@@ -174,7 +174,7 @@ class Trainer(DefaultTrainer):
             # It may not always print what you want to see, since it prints "common" metrics only.
             CommonMetricPrinter(self.max_iter),
             JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
-            WandbWriter(),
+            #WandbWriter(),
         ]
 
     @classmethod
@@ -209,7 +209,9 @@ class Trainer(DefaultTrainer):
         )
 
         params: List[Dict[str, Any]] = []
+        # params = []
         memo: Set[torch.nn.parameter.Parameter] = set()
+        # memo = set()
         for module_name, module in model.named_modules():
             for module_param_name, value in module.named_parameters(recurse=False):
                 if not value.requires_grad:
@@ -300,8 +302,8 @@ def setup(args):
     cfg.freeze()
     default_setup(cfg, args)
     # Setup logger for "mask_former" module
-    if not args.eval_only:
-        setup_wandb(cfg, args)
+    # if not args.eval_only:
+        # setup_wandb(cfg, args)
     setup_logger(
         output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="mask_former"
     )

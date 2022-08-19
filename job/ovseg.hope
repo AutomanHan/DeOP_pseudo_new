@@ -1,0 +1,80 @@
+## 表示作业的基本信息，自动填充，请勿修改
+[base]
+type = ml-vision
+
+[resource]
+usergroup = hadoop-vacv
+queue = root.zw05_training_cluster.hadoop-vision.elastic_job
+
+## 数据集信息（支持配置多个，位置需一一对应，','分隔）
+[dataset]
+dataset_name =
+dataset_type =
+dataset_path =
+
+## 作业串联相关配置
+[job_track]
+## 上游任务id（支持配置多个，','分隔）
+upstream_jobid =
+## 输入目录配置（支持配置多个，','分隔）
+input_dir =
+## 输出目录配置（支持配置多个，','分隔）
+output_dir =
+## 日志输出目录（支持配置多个，','分隔）
+log_dir =
+demand_id = 1748
+
+[roles]
+workers = 1
+worker.memory = 180480
+worker.vcore = 64
+worker.gcores32g = 8
+## worker启动后执行的脚本，一般为训练作业的执行命令
+worker.script = sh train_learned_prompts_maskformer.sh
+#worker.script = sh train_learn_prompts.sh
+
+## worker端python脚本的输入参数
+## 可以设置args.batch_size = 32，则会向worker.script追加参数--batch_size=32
+[user_args]
+
+[am]
+afo.app.am.resource.mb = 4096
+
+[tensorboard]
+with.tensor.board = false
+
+## docker环境配置
+[docker]
+afo.docker.image.name = registryonline-hulk.sankuai.com/custom_prod/com.sankuai.data.hadoop.gpu/data-hadoop-vacv_docker:cuda11.0-ff9937e0
+
+## 是否使用预拉取
+[data]
+afo.data.prefetch=false
+
+## 是否支持容错
+[failover]
+afo.app.support.engine.failover=true
+
+## conda环境上传
+# [conda]
+afo.conda.env.name = ovseg
+afo.conda.env.path = viewfs://hadoop-meituan/zw03mlnn01/user/conda/hancong11/default/ovseg.tar.gz
+
+## 可合并xml配置文件，输入当前目录的xml文件名
+# [config]
+# config.file =
+
+## 多机情况下可以配置不同的分布式模式，默认取值为tensorflow，代表tensorflow/ps架构。其他取值有mpi，代表mpi/horovod架构；pytorch，代表pytorch/ddp架构。
+# [distribute]
+# distribute.mode =
+
+[others]
+## pytorch dataloader可能会用到共享内存，配置需要的共享内存（单位为B）
+afo.app.env.YARN_CONTAINER_RUNTIME_DOCKER_SHM_SIZE_BYTES=40000000000
+## 作业结束后，会通过大象通知用户
+afo.xm.notice.receivers.account=hancong11
+## 若配置true，则会安装.hope文件同路径下requirements.txt中配置的依赖
+with_requirements = false
+## 作业排队时间上限，单位秒
+afo.app.yarn.allocate.timeout.seconds = 14400
+

@@ -6,6 +6,7 @@ from detectron2.data.datasets import load_sem_seg
 from .utils import load_binary_mask
 
 CLASS_NAMES = (
+    "unlabel",
     "aeroplane",
     "bicycle",
     "bird",

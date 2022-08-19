@@ -1,11 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-import os
-
-from detectron2.data import DatasetCatalog, MetadataCatalog
-from detectron2.data.datasets import load_sem_seg
-
-from .utils import load_binary_mask
-
 COCO_CATEGORIES = [
     {"color": [220, 20, 60], "isthing": 1, "id": 1, "name": "person"},
     {"color": [119, 11, 32], "isthing": 1, "id": 2, "name": "bicycle"},
@@ -183,18 +175,21 @@ COCO_CATEGORIES = [
 COCO_BASE_CATEGORIES = [
     c
     for i, c in enumerate(COCO_CATEGORIES)
-    if c["id"] - 1
-    # if c["id"]
+    # if c["id"] - 1
+    if c["id"]
     not in [20, 24, 32, 33, 40, 56, 86, 99, 105, 123, 144, 147, 148, 168, 171]
 ]
 COCO_NOVEL_CATEGORIES = [
     c
     for i, c in enumerate(COCO_CATEGORIES)
-    if c["id"] - 1
-    # if c["id"]
+    # if c["id"] - 1
+    if c["id"]
     in [20, 24, 32, 33, 40, 56, 86, 99, 105, 123, 144, 147, 148, 168, 171]
 ]
 
+
+print(COCO_BASE_CATEGORIES)
+print(COCO_NOVEL_CATEGORIES)
 
 def _get_coco_stuff_meta(cat_list):
     # Id 0 is reserved for ignore_label, we change ignore_label for 0
@@ -212,194 +207,8 @@ def _get_coco_stuff_meta(cat_list):
     }
     return ret
 
-
-def register_all_coco_stuff_10k(root):
-    root = os.path.join(root, "coco", "coco_stuff_10k")
-    meta = _get_coco_stuff_meta(COCO_CATEGORIES)
-    for name, image_dirname, sem_seg_dirname in [
-        ("train", "images_detectron2/train", "annotations_detectron2/train"),
-        ("test", "images_detectron2/test", "annotations_detectron2/test"),
-    ]:
-        image_dir = os.path.join(root, image_dirname)
-        gt_dir = os.path.join(root, sem_seg_dirname)
-        name = f"coco_2017_{name}_stuff_10k_sem_seg"
-        DatasetCatalog.register(
-            name,
-            lambda x=image_dir, y=gt_dir: load_sem_seg(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(name).set(
-            image_root=image_dir,
-            sem_seg_root=gt_dir,
-            evaluator_type="sem_seg",
-            ignore_label=255,
-            **meta,
-        )
-
-
-def register_all_coco_stuff_164k(root):
-    root = os.path.join(root, "coco")
-    meta = _get_coco_stuff_meta(COCO_CATEGORIES)
-    base_meta = _get_coco_stuff_meta(COCO_BASE_CATEGORIES)
-    novel_meta = _get_coco_stuff_meta(COCO_NOVEL_CATEGORIES)
-
-    for name, image_dirname, sem_seg_dirname in [
-        ("train", "train2017", "stuffthingmaps_detectron2/train2017"),
-        ("test", "val2017", "stuffthingmaps_detectron2/val2017"),
-    ]:
-        image_dir = os.path.join(root, image_dirname)
-        gt_dir = os.path.join(root, sem_seg_dirname)
-        all_name = f"coco_2017_{name}_stuff_sem_seg"
-        DatasetCatalog.register(
-            all_name,
-            lambda x=image_dir, y=gt_dir: load_sem_seg(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(all_name).set(
-            image_root=image_dir,
-            sem_seg_root=gt_dir,
-            evaluator_type="sem_seg",
-            ignore_label=255,
-            evaluation_set={
-                "base": [
-                    meta["stuff_classes"].index(n) for n in base_meta["stuff_classes"]
-                ],
-                "novel_thing": [
-                    meta["stuff_classes"].index(n)
-                    for i, n in enumerate(novel_meta["stuff_classes"])
-                    if COCO_NOVEL_CATEGORIES[i].get("isthing", 0) == 1
-                ],
-                "novel_stuff": [
-                    meta["stuff_classes"].index(n)
-                    for i, n in enumerate(novel_meta["stuff_classes"])
-                    if COCO_NOVEL_CATEGORIES[i].get("isthing", 0) == 0
-                ],
-            },
-            trainable_flag=[
-                1 if n in base_meta["stuff_classes"] else 0
-                for n in meta["stuff_classes"]
-            ],
-            **meta,
-        )
-        # classification
-        DatasetCatalog.register(
-            all_name + "_classification",
-            lambda x=image_dir, y=gt_dir: load_binary_mask(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(all_name + "_classification").set(
-            image_root=image_dir,
-            sem_seg_root=gt_dir,
-            evaluator_type="classification",
-            ignore_label=255,
-            evaluation_set={
-                "base": [
-                    meta["stuff_classes"].index(n) for n in base_meta["stuff_classes"]
-                ],
-            },
-            trainable_flag=[
-                1 if n in base_meta["stuff_classes"] else 0
-                for n in meta["stuff_classes"]
-            ],
-            **meta,
-        )
-
-        # zero shot
-        image_dir = os.path.join(root, image_dirname)
-        gt_dir = os.path.join(root, sem_seg_dirname + "_base")
-        base_name = f"coco_2017_{name}_stuff_base_sem_seg"
-
-        DatasetCatalog.register(
-            base_name,
-            lambda x=image_dir, y=gt_dir: load_sem_seg(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(base_name).set(
-            image_root=image_dir,
-            sem_seg_root=gt_dir,
-            evaluator_type="sem_seg",
-            ignore_label=255,
-            **base_meta,
-        )
-        # classification
-        DatasetCatalog.register(
-            base_name + "_classification",
-            lambda x=image_dir, y=gt_dir: load_binary_mask(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(base_name + "_classification").set(
-            image_root=image_dir,
-            sem_seg_root=gt_dir,
-            evaluator_type="classification",
-            ignore_label=255,
-            **base_meta,
-        )
-        # zero shot
-        image_dir = os.path.join(root, image_dirname)
-        gt_dir = os.path.join(root, sem_seg_dirname + "_novel")
-        novel_name = f"coco_2017_{name}_stuff_novel_sem_seg"
-        DatasetCatalog.register(
-            novel_name,
-            lambda x=image_dir, y=gt_dir: load_sem_seg(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(novel_name).set(
-            image_root=image_dir,
-            sem_seg_root=gt_dir,
-            evaluator_type="sem_seg",
-            ignore_label=255,
-            **novel_meta,
-        )
-
-
-def register_all_coco_stuff_164k_pseudo(root, pseudo_sem_dir):
-    root = os.path.join(root, "coco")
-    meta = _get_coco_stuff_meta(COCO_CATEGORIES)
-    base_meta = _get_coco_stuff_meta(COCO_BASE_CATEGORIES)
-    novel_meta = _get_coco_stuff_meta(COCO_NOVEL_CATEGORIES)
-
-    for name, image_dirname, sem_seg_dirname in [
-        ("train", "train2017", "stuffthingmaps_detectron2/train2017"),
-    ]:
-        image_dir = os.path.join(root, image_dirname)
-
-        all_name = f"coco_2017_{name}_stuff_sem_seg_pseudo"
-        DatasetCatalog.register(
-            all_name,
-            lambda x=image_dir, y=pseudo_sem_dir: load_sem_seg(
-                y, x, gt_ext="png", image_ext="jpg"
-            ),
-        )
-        MetadataCatalog.get(all_name).set(
-            image_root=image_dir,
-            sem_seg_root=pseudo_sem_dir,
-            evaluator_type="sem_seg",
-            ignore_label=255,
-            evaluation_set={
-                "base": [
-                    meta["stuff_classes"].index(n) for n in base_meta["stuff_classes"]
-                ],
-                "novel": [
-                    meta["stuff_classes"].index(n) for n in novel_meta["stuff_classes"]
-                ],
-            },
-            trainable_flag=[
-                1 if n in base_meta["stuff_classes"] else 0
-                for n in meta["stuff_classes"]
-            ],
-            **meta,
-        )
-
-
-_root = os.getenv("DETECTRON2_DATASETS", "datasets")
-register_all_coco_stuff_10k(_root)
-register_all_coco_stuff_164k(_root)
-
-_pseudo_dir = os.getenv("DETECTRON2_SEM_PSEUDO", "output/inference")
-register_all_coco_stuff_164k_pseudo(_root, _pseudo_dir)
+import pdb; pdb.set_trace()
+meta = _get_coco_stuff_meta(COCO_CATEGORIES)
+base_meta = _get_coco_stuff_meta(COCO_BASE_CATEGORIES)
+novel_meta = _get_coco_stuff_meta(COCO_NOVEL_CATEGORIES)
+import pdb; pdb.set_trace()

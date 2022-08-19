@@ -138,11 +138,13 @@ def load(
         raise RuntimeError(
             f"Model {name} not found; available models = {available_models()}"
         )
-
+    print("load clip model, from path: ", model_path)
     try:
         # loading JIT archive
         model = torch.jit.load(model_path, map_location=device if jit else "cpu").eval()
         state_dict = None
+        print("jit model")
+        # print(model)
     except RuntimeError:
         # loading saved state dict
         if jit:

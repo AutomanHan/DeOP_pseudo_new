@@ -2,6 +2,7 @@
 import itertools
 import json
 import logging
+from unicodedata import category
 import numpy as np
 import os
 from collections import OrderedDict
@@ -76,8 +77,28 @@ class GeneralizedSemSegEvaluator(SemSegEvaluator):
                 (self._num_classes + 1) * pred.reshape(-1) + gt.reshape(-1),
                 minlength=self._conf_matrix.size,
             ).reshape(self._conf_matrix.shape)
-
+            
             self._predictions.extend(self.encode_json_sem_seg(pred, input["file_name"]))
+            
+            '''
+            encodeJsonSemSeg = self.encode_json_sem_seg(pred, input["file_name"])
+            
+            print(len(encodeJsonSemSeg))
+            categoryIds = ""
+            # Image.fromarray(pred.astype(np.uint8)).save("../output/tmp_img/out_"+encodeJsonSemSeg[-1]["file_name"].split("/")[-1].replace("jpg", "png"), "PNG")
+            for label in np.unique(pred):
+                if self._contiguous_id_to_dataset_id is not None:
+                    assert (
+                        label in self._contiguous_id_to_dataset_id
+                    ), "Label {} is not in the metadata info for {}".format(label, self._dataset_name)
+                    dataset_id = self._contiguous_id_to_dataset_id[label]
+                else:
+                    print("no contiguous_id_to_dataset_id")
+                    dataset_id = int(label)
+                categoryIds += str(dataset_id) + " "
+            print(encodeJsonSemSeg[-1]["file_name"], categoryIds)
+        print(self._contiguous_id_to_dataset_id)
+        '''
 
     def evaluate(self):
         """

@@ -398,8 +398,8 @@ def register_all_coco_stuff_164k_pseudo(root, pseudo_sem_dir):
 
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
-register_all_coco_stuff_10k(_root)
-register_all_coco_stuff_164k(_root)
+# register_all_coco_stuff_10k(_root)
+# register_all_coco_stuff_164k(_root)
 
 _pseudo_dir = os.getenv("DETECTRON2_SEM_PSEUDO", "output/inference")
 register_all_coco_stuff_164k_pseudo(_root, _pseudo_dir)

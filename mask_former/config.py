@@ -135,6 +135,7 @@ def add_our_config(cfg):
     cfg.WANDB = CN()
     cfg.WANDB.PROJECT = "zero_shot_seg"
     cfg.WANDB.NAME = None
+    cfg.WANDB.ENTITY = ""
 
 
 def add_mask_former_config(cfg):

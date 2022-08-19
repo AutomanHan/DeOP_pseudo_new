@@ -184,14 +184,12 @@ COCO_BASE_CATEGORIES = [
     c
     for i, c in enumerate(COCO_CATEGORIES)
     if c["id"] - 1
-    # if c["id"]
     not in [20, 24, 32, 33, 40, 56, 86, 99, 105, 123, 144, 147, 148, 168, 171]
 ]
 COCO_NOVEL_CATEGORIES = [
     c
     for i, c in enumerate(COCO_CATEGORIES)
     if c["id"] - 1
-    # if c["id"]
     in [20, 24, 32, 33, 40, 56, 86, 99, 105, 123, 144, 147, 148, 168, 171]
 ]
 

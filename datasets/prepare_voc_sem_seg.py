@@ -87,6 +87,7 @@ def main():
         "train_novel",
         "val_base",
         "val_novel",
+        "train_base_10class"
     ]:
         os.makedirs(osp.join(out_mask_dir, dir_name), exist_ok=True)
         if dir_name in ["train", "val"]:
@@ -102,60 +103,72 @@ def main():
     ]
 
     if args.nproc > 1:
-        mmcv.track_parallel_progress(
-            partial(convert_to_trainID, out_mask_dir=out_mask_dir, is_train=True),
-            train_list,
-            nproc=nproc,
-        )
-        mmcv.track_parallel_progress(
-            partial(convert_to_trainID, out_mask_dir=out_mask_dir, is_train=False),
-            test_list,
-            nproc=nproc,
-        )
-        mmcv.track_parallel_progress(
-            partial(
-                convert_to_trainID,
-                out_mask_dir=out_mask_dir,
-                is_train=True,
-                clsID_to_trID=base_clsID_to_trID,
-                suffix="_base",
-            ),
-            train_list,
-            nproc=nproc,
-        )
-        mmcv.track_parallel_progress(
-            partial(
-                convert_to_trainID,
-                out_mask_dir=out_mask_dir,
-                is_train=True,
-                clsID_to_trID=base_clsID_to_trID,
-                suffix="_base_10class",
-            ),
-            train_list,
-            nproc=nproc,
-        )
-        mmcv.track_parallel_progress(
-            partial(
-                convert_to_trainID,
-                out_mask_dir=out_mask_dir,
-                is_train=True,
-                clsID_to_trID=novel_clsID_to_trID,
-                suffix="_novel",
-            ),
-            train_list,
-            nproc=nproc,
-        )
+        # mmcv.track_parallel_progress(
+        #     partial(convert_to_trainID, out_mask_dir=out_mask_dir, is_train=True),
+        #     train_list,
+        #     nproc=nproc,
+        # )
+        # mmcv.track_parallel_progress(
+        #     partial(convert_to_trainID, out_mask_dir=out_mask_dir, is_train=False),
+        #     test_list,
+        #     nproc=nproc,
+        # )
+        # mmcv.track_parallel_progress(
+        #     partial(
+        #         convert_to_trainID,
+        #         out_mask_dir=out_mask_dir,
+        #         is_train=True,
+        #         clsID_to_trID=base_clsID_to_trID,
+        #         suffix="_base",
+        #     ),
+        #     train_list,
+        #     nproc=nproc,
+        # )
         mmcv.track_parallel_progress(
             partial(
                 convert_to_trainID,
                 out_mask_dir=out_mask_dir,
                 is_train=False,
-                clsID_to_trID=novel_clsID_to_trID,
-                suffix="_novel",
+                clsID_to_trID=base_clsID_to_trID,
+                suffix="_base",
             ),
             test_list,
             nproc=nproc,
         )
+        # mmcv.track_parallel_progress(
+        #     partial(
+        #         convert_to_trainID,
+        #         out_mask_dir=out_mask_dir,
+        #         is_train=True,
+        #         clsID_to_trID=base_clsID_to_trID,
+        #         suffix="_base_10class",
+        #     ),
+        #     train_list,
+        #     nproc=nproc,
+        # )
+        # mmcv.track_parallel_progress(
+        #     partial(
+        #         convert_to_trainID,
+        #         out_mask_dir=out_mask_dir,
+        #         is_train=True,
+        #         clsID_to_trID=novel_clsID_to_trID,
+        #         suffix="_novel",
+        #     ),
+        #     train_list,
+        #     nproc=nproc,
+        # )
+        # import pdb; pdb.set_trace()
+        # mmcv.track_parallel_progress(
+        #     partial(
+        #         convert_to_trainID,
+        #         out_mask_dir=out_mask_dir,
+        #         is_train=False,
+        #         clsID_to_trID=novel_clsID_to_trID,
+        #         suffix="_novel",
+        #     ),
+        #     test_list,
+        #     nproc=nproc,
+        # )
     else:
         mmcv.track_progress(
             partial(convert_to_trainID, out_mask_dir=out_mask_dir, is_train=True),

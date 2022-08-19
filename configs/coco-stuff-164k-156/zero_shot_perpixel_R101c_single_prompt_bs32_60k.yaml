@@ -3,9 +3,10 @@ MODEL:
   META_ARCHITECTURE: "ZeroShotPerPixelModel"
   BACKBONE:
     NAME: "build_resnet_deeplab_backbone"
-  WEIGHTS: "detectron2://DeepLab/R-103.pkl"
+  # WEIGHTS: "detectron2://DeepLab/R-103.pkl"
+  WEIGHTS: ""
   RESNETS:
-    DEPTH: 101
+    # DEPTH: 101
     STEM_TYPE: "deeplab"
     STEM_OUT_CHANNELS: 128
     STRIDE_IN_1X1: False
@@ -24,3 +25,5 @@ MODEL:
     NORM: "GN"
   CLIP_ADAPTER:
     CLIP_ENSEMBLE_WEIGHT: 0.7
+SOLVER:
+  IMS_PER_BATCH: 4

@@ -3,6 +3,8 @@ output
 outputs
 instant_test_output
 inference_test_output
+prompt
+
 
 
 *.json
@@ -23,10 +25,10 @@ dist/
 wheels/
 
 # pytorch/python/numpy formats
-*.pth
-*.pkl
-*.npy
-*.ts
+#*.pth
+#*.pkl
+#*.npy
+#*.ts
 model_ts*.txt
 
 # ipython/jupyter notebooks
