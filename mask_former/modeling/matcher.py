@@ -107,9 +107,12 @@ class HungarianMatcher(nn.Module):
             out_prob = outputs["pred_logits"][b].softmax(
                 -1
             )  # [num_queries, num_classes]
+            # print("out_prob: ")
+            # print(out_prob.shape)
             out_mask = outputs["pred_masks"][b]  # [num_queries, H_pred, W_pred]
 
             tgt_ids = targets[b]["labels"]
+            # print("tgt ids: ",tgt_ids)
             # gt masks are already padded when preparing target
             tgt_mask = targets[b]["masks"].to(out_mask)
 
