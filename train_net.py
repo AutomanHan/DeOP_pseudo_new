@@ -329,6 +329,7 @@ def main(args):
 
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume=args.resume)
+    torch.autograd.set_detect_anomaly(True)
     return trainer.train()
 
 

@@ -47,6 +47,7 @@ class ZeroShotMaskFormer(MaskFormer):
         clip_ensemble_weight: float,
         pixel_mean: Tuple[float],
         pixel_std: Tuple[float],
+        clip_kd_loss: bool,
     ):
         """
         Args:
@@ -89,6 +90,7 @@ class ZeroShotMaskFormer(MaskFormer):
 
         self.clip_ensemble: bool = clip_ensemble
         self.clip_ensemble_weight: float = clip_ensemble_weight
+        self.clip_kd_loss: bool = clip_kd_loss
 
     @classmethod
     def from_config(cls, cfg):
@@ -129,6 +131,7 @@ class ZeroShotMaskFormer(MaskFormer):
             "clip_ensemble_weight"
         ] = cfg.MODEL.CLIP_ADAPTER.CLIP_ENSEMBLE_WEIGHT
 
+        init_kwargs["clip_kd_loss"] = cfg.MODEL.MASK_FORMER.CLIP_KD_LOSS
         return init_kwargs
 
     def forward(self, batched_inputs):
@@ -169,10 +172,25 @@ class ZeroShotMaskFormer(MaskFormer):
         outputs = self.sem_seg_head(features)
         class_names = self.get_class_name_list(dataset_name)
         text_features = self.clip_adapter.get_text_features(class_names)
+
+        # import pdb; pdb.set_trace()
+        if self.clip_kd_loss:
+            semseg_pred_mask = outputs["pred_masks"]
+            semseg_pred_logits = outputs["pred_logits"]
+            
+        # import pdb; pdb.set_trace()
+
         outputs["pred_logits"] = self.clip_adapter.get_sim_logits(
             text_features, self.clip_adapter.normalize_feature(outputs["pred_logits"])
         )
         if self.training:
+            if self.clip_kd_loss:
+                outputs["pred_region_logits"] = semseg_pred_logits
+                # outputs["pred_masks_semseg"]
+                target_regionfeature_results, target_regionfeature_valid= self.kd_region_feature(semseg_pred_mask,batched_inputs, images)
+                outputs["clip_region_logits"] = target_regionfeature_results
+                outputs["clip_region_valid"] = target_regionfeature_valid
+
             if "aux_outputs" in outputs.keys():
                 for i in range(len(outputs["aux_outputs"])):
                     outputs["aux_outputs"][i][
@@ -192,7 +210,8 @@ class ZeroShotMaskFormer(MaskFormer):
 
             # bipartite matching-based loss
             losses = self.criterion(outputs, targets)
-
+            losses.update(self.kd_loss_cal(output=outputs))
+            # import pdb; pdb.set_trace()
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
                     losses[k] *= self.criterion.weight_dict[k]
@@ -239,6 +258,34 @@ class ZeroShotMaskFormer(MaskFormer):
                     processed_results[-1]["panoptic_seg"] = panoptic_r
 
             return processed_results
+    
+    # image 经过 clip image encode
+    def kd_region_feature(self, mask_pred_results,batched_inputs, images):
+        # upsample masks
+        mask_pred_results = F.interpolate(
+            mask_pred_results,
+            size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+            mode="bilinear",
+            align_corners=False,
+        )
+        regionfeature_results = []
+        regionfeature_valid = []
+        for mask_pred_result, input_per_image, image_size in zip(
+             mask_pred_results, batched_inputs, images.image_sizes
+        ):
+            height = image_size[0]
+            width = image_size[1]
+            mask_pred_result = sem_seg_postprocess(
+                mask_pred_result, image_size, height, width
+            )
+            image = input_per_image["image"].to(self.device)
+            mask_pred_result = mask_pred_result.sigmoid()
+            region_features, valid_flag = self.region_clip_adapter.get_region_features(
+                image, mask_pred_result, normalize=True
+            )
+            regionfeature_results.append(region_features)
+            regionfeature_valid.append(valid_flag)
+        return torch.stack(regionfeature_results), torch.stack(regionfeature_valid)
 
     def semantic_inference(self, mask_cls, mask_pred, image, class_names, dataset_name):
         mask_cls = F.softmax(mask_cls, dim=-1)[..., :-1]
@@ -288,3 +335,21 @@ class ZeroShotMaskFormer(MaskFormer):
         if self._region_clip_adapter is None:
             return self.clip_adapter
         return self._region_clip_adapter
+
+    def kd_loss_cal(self, output):
+        semseg_pred_logits =output["pred_region_logits"]
+        target_regionfeature_results=output["clip_region_logits"]
+        target_regionfeature_valid = output["clip_region_valid"]
+        # import pdb; pdb.set_trace()
+        # semseg_pred_logits = semseg_pred_logits[target_regionfeature_valid]
+        # for idx in range(semseg_pred_logits.shape[0]):
+        #     semseg_pred_logits[idx] = semseg_pred_logits[idx][target_regionfeature_valid[idx]]
+        #     target_regionfeature_results[idx] = target_regionfeature_results[idx][target_regionfeature_valid[idx]]
+        # import pdb; pdb.set_trace()
+        # target_regionfeature_results = target_regionfeature_results[target_regionfeature_valid]
+        # if()
+        if target_regionfeature_valid.sum() > 0:
+            loss_kd = F.l1_loss(semseg_pred_logits[target_regionfeature_valid],target_regionfeature_results[target_regionfeature_valid])
+        else:
+            loss_kd = F.l1_loss(semseg_pred_logits,target_regionfeature_results)
+        return {"loss_kd": loss_kd}

@@ -89,6 +89,7 @@ class MaskFormer(nn.Module):
         no_object_weight = cfg.MODEL.MASK_FORMER.NO_OBJECT_WEIGHT
         dice_weight = cfg.MODEL.MASK_FORMER.DICE_WEIGHT
         mask_weight = cfg.MODEL.MASK_FORMER.MASK_WEIGHT
+        kd_weight = cfg.MODEL.MASK_FORMER.CLIP_KD_WEIGHT
 
         # building criterion
         matcher = HungarianMatcher(
@@ -97,7 +98,7 @@ class MaskFormer(nn.Module):
             cost_dice=dice_weight,
         )
 
-        weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight}
+        weight_dict = {"loss_ce": 1, "loss_mask": mask_weight, "loss_dice": dice_weight, "loss_kd": kd_weight}
         if deep_supervision:
             dec_layers = cfg.MODEL.MASK_FORMER.DEC_LAYERS
             aux_weight_dict = {}

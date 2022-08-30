@@ -159,6 +159,9 @@ def crop_with_mask(
     t = max(t, 0)
     r = min(r, w)
     b = min(b, h)
+    if(r-l ==0 or b-t ==0):
+        r= h //10
+        b = h // 10
     new_image = torch.cat(
         [image.new_full((1, b - t, r - l), fill_value=val) for val in fill]
     )

@@ -155,7 +155,10 @@ def load(
         state_dict = torch.load(model_path, map_location="cpu")
 
     if not jit:
+        print("not jit")
+        # print(model.state_dict())
         model = build_model(state_dict or model.state_dict()).to(device)
+
         if str(device) == "cpu":
             model.float()
         return model, _transform(model.visual.input_resolution)

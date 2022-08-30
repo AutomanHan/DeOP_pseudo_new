@@ -132,6 +132,26 @@ class MaskFormerClipAdapter(ClipAdapter):
             image_features = self.get_image_features(image)
         text_feature = self.get_text_features(text)  # k,feat_dim
         return self.get_sim_logits(text_feature, image_features), valid_flag
+     
+    # 获取每个mask对应region feature 
+    def get_region_features(
+            self,
+            image: torch.Tensor,
+            mask: torch.Tensor,
+            normalize: bool = True
+        ):
+        image, valid_flag = self._preprocess_image_kd(image, mask, normalize=normalize)
+        if image is None:
+            return None, valid_flag
+        if isinstance(image, list):
+            image_features = torch.cat(
+                [self.get_image_features(image_i) for image_i in image], dim=0
+            )
+        else:
+            image_features = self.get_image_features(image)
+        
+        return image_features, valid_flag
+
 
     def _preprocess_image(
         self, image: torch.Tensor, mask: torch.Tensor, normalize: bool = True
@@ -174,6 +194,48 @@ class MaskFormerClipAdapter(ClipAdapter):
             ]
             regions = torch.cat(regions)
         return regions, valid
+    def _preprocess_image_kd(
+        self, image: torch.Tensor, mask: torch.Tensor, normalize: bool = True
+    ):
+        """crop, mask and normalize the image
+
+        Args:
+            image ([type]): [C,H,W]
+            mask ([type]): [K,H,W
+            normalize (bool, optional): [description]. Defaults to True.
+        """
+        dtype = mask.dtype
+        bin_mask = mask > self.mask_thr
+        valid = bin_mask.sum(dim=(-1, -2)) > 0
+        # bin_mask = bin_mask[valid]
+        # mask = mask[valid]
+        if not self.mask_matting:
+            mask = bin_mask
+        bin_mask = BitMasks(bin_mask)
+        bboxes = bin_mask.get_bounding_boxes()
+        # crop,mask
+        regions = [
+            crop_with_mask(
+                image.type(dtype),
+                single_mask.type(dtype),
+                bbox,
+                fill=self.mask_fill,
+                expand_ratio=self.mask_expand_ratio,
+            )[None, ...]
+            for bbox, single_mask in zip(bboxes, mask)
+        ]
+        if len(regions) == 0:
+            return None, valid
+        if normalize:
+            regions = [(r - self.pixel_mean) / self.pixel_std for r in regions]
+        # resize
+        if self.region_resized:
+            regions = [
+                F.interpolate(r, size=(224, 224), mode="bicubic") for r in regions
+            ]
+            regions = torch.cat(regions)
+        return regions, valid
+
 
     def get_text_features(self, noun_list: List[str]):
         object_text_features = self._get_text_features(noun_list)
