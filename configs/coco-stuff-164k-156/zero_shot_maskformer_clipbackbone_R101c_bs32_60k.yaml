@@ -1,5 +1,6 @@
 _BASE_: zero_shot_maskformer_R50_bs32_60k.yaml
 MODEL:
+  BACKBONE_CLIP: True
   BACKBONE:
     NAME: "build_resnet_deeplab_backbone"
   #WEIGHTS: "detectron2://DeepLab/R-103.pkl"
@@ -14,13 +15,13 @@ MODEL:
     OUT_FEATURES: ["res2", "res3", "res4", "res5"]
     # NORM: "SyncBN"
     RES5_MULTI_GRID: [1, 2, 4]
-  CLIP_ADAPTER: 
-    CLIP_ENSEMBLE: True
+  MASKFORMER:
+    DEEP_SUPERVISION: False
+  CLIP_ADAPTER:
+    # CLIP_ENSEMBLE: True
+    CLIP_ENSEMBLE: False
     CLIP_ENSEMBLE_WEIGHT: 0.8
-  MASK_FORMER:
-    CLIP_KD_WEIGHT: 1.0
-    CLIP_KD_LOSS: True
-    CLIP_KD_PROJ: True
+  
   
 OUTPUT_DIR: "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/hancong/code/pretrain/ov-seg/zsseg.baseline/prompt/output0817/R101c_learned_prompt_bs32_60k_newdata"
 DATASETS:
@@ -28,7 +29,7 @@ DATASETS:
   TEST: ("coco_2017_test_stuff_base_sem_seg", "coco_2017_test_stuff_novel_sem_seg", "coco_2017_test_stuff_sem_seg")
   TEST: ("coco_2017_test_stuff_sem_seg",)
 SOLVER:
-  # IMS_PER_BATCH: 4
+  IMS_PER_BATCH: 4
   TEST_IMS_PER_BATCH: 2
 TEST:
   EVAL_PERIOD: 20000

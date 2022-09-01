@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import logging
+from turtle import ScrolledCanvas
 from typing import Tuple
 
 import torch
@@ -31,6 +32,7 @@ class ZeroShotMaskFormer(MaskFormer):
     def __init__(
         self,
         *,
+        clipAsBackbone: bool,
         backbone: Backbone,
         sem_seg_head: nn.Module,
         clip_adapter: nn.Module,
@@ -48,6 +50,8 @@ class ZeroShotMaskFormer(MaskFormer):
         pixel_mean: Tuple[float],
         pixel_std: Tuple[float],
         clip_kd_loss: bool,
+        maskformer_hiddendim: int,
+        clipKdProj: bool,
     ):
         """
         Args:
@@ -72,6 +76,7 @@ class ZeroShotMaskFormer(MaskFormer):
                 the per-channel mean and std to be used to normalize the input image
         """
         super().__init__(
+            clipAsBackbone=clipAsBackbone,
             backbone=backbone,
             sem_seg_head=sem_seg_head,
             criterion=criterion,
@@ -91,6 +96,9 @@ class ZeroShotMaskFormer(MaskFormer):
         self.clip_ensemble: bool = clip_ensemble
         self.clip_ensemble_weight: float = clip_ensemble_weight
         self.clip_kd_loss: bool = clip_kd_loss
+        self.clipKdProj: bool = clipKdProj
+        if self.clipKdProj:
+            self.kd_proj = nn.Linear(maskformer_hiddendim,maskformer_hiddendim)
 
     @classmethod
     def from_config(cls, cfg):
@@ -132,6 +140,9 @@ class ZeroShotMaskFormer(MaskFormer):
         ] = cfg.MODEL.CLIP_ADAPTER.CLIP_ENSEMBLE_WEIGHT
 
         init_kwargs["clip_kd_loss"] = cfg.MODEL.MASK_FORMER.CLIP_KD_LOSS
+        init_kwargs["clipAsBackbone"] = cfg.MODEL.BACKBONE_CLIP
+        init_kwargs["clipKdProj"] = cfg.MODEL.MASK_FORMER.CLIP_KD_PROJ
+        init_kwargs["maskformer_hiddendim"] = cfg.MODEL.SEM_SEG_HEAD.EMBEDDING_DIM
         return init_kwargs
 
     def forward(self, batched_inputs):
@@ -167,9 +178,17 @@ class ZeroShotMaskFormer(MaskFormer):
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
-
-        features = self.backbone(images.tensor)
-        outputs = self.sem_seg_head(features)
+        # clip image encoder 作为backbone
+        if self.clipAsBackbone:
+            features, det_features = self.backbone.visual(images.tensor)
+            outputs = self.sem_seg_head([features, det_features])
+        else:
+            features = self.backbone(images.tensor)
+            outputs = self.sem_seg_head(features)
+        # features = self.backbone(images.tensor)
+        
+            
+        
         class_names = self.get_class_name_list(dataset_name)
         text_features = self.clip_adapter.get_text_features(class_names)
 
@@ -184,12 +203,7 @@ class ZeroShotMaskFormer(MaskFormer):
             text_features, self.clip_adapter.normalize_feature(outputs["pred_logits"])
         )
         if self.training:
-            if self.clip_kd_loss:
-                outputs["pred_region_logits"] = semseg_pred_logits
-                # outputs["pred_masks_semseg"]
-                target_regionfeature_results, target_regionfeature_valid= self.kd_region_feature(semseg_pred_mask,batched_inputs, images)
-                outputs["clip_region_logits"] = target_regionfeature_results
-                outputs["clip_region_valid"] = target_regionfeature_valid
+            
 
             if "aux_outputs" in outputs.keys():
                 for i in range(len(outputs["aux_outputs"])):
@@ -209,8 +223,14 @@ class ZeroShotMaskFormer(MaskFormer):
                 targets = None
 
             # bipartite matching-based loss
-            losses = self.criterion(outputs, targets)
-            losses.update(self.kd_loss_cal(output=outputs))
+            losses, indicesSrc = self.criterion(outputs, targets)
+            if self.clip_kd_loss:
+                outputs["pred_region_logits"] = semseg_pred_logits
+                # outputs["pred_masks_semseg"]
+                target_regionfeature_results, target_regionfeature_valid= self.kd_region_feature(semseg_pred_mask,batched_inputs, images)
+                outputs["clip_region_logits"] = target_regionfeature_results
+                outputs["clip_region_valid"] = target_regionfeature_valid
+            losses.update(self.kd_loss_cal(output=outputs, indices=indicesSrc))
             # import pdb; pdb.set_trace()
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
@@ -336,9 +356,12 @@ class ZeroShotMaskFormer(MaskFormer):
             return self.clip_adapter
         return self._region_clip_adapter
 
-    def kd_loss_cal(self, output):
+    def kd_loss_cal(self, output, indices):
         semseg_pred_logits =output["pred_region_logits"]
         target_regionfeature_results=output["clip_region_logits"]
+        # import pdb; pdb.set_trace()
+        if self.clipKdProj:
+            semseg_pred_logits = self.kd_proj(semseg_pred_logits)
         target_regionfeature_valid = output["clip_region_valid"]
         # import pdb; pdb.set_trace()
         # semseg_pred_logits = semseg_pred_logits[target_regionfeature_valid]
@@ -348,8 +371,17 @@ class ZeroShotMaskFormer(MaskFormer):
         # import pdb; pdb.set_trace()
         # target_regionfeature_results = target_regionfeature_results[target_regionfeature_valid]
         # if()
-        if target_regionfeature_valid.sum() > 0:
-            loss_kd = F.l1_loss(semseg_pred_logits[target_regionfeature_valid],target_regionfeature_results[target_regionfeature_valid])
-        else:
-            loss_kd = F.l1_loss(semseg_pred_logits,target_regionfeature_results)
+        src_idx = self._get_src_permutation_idx(indices)
+        loss_kd = F.l1_loss(semseg_pred_logits[src_idx], target_regionfeature_results[src_idx])
+        # if target_regionfeature_valid.sum() > 0:
+        #     loss_kd = F.l1_loss(semseg_pred_logits[target_regionfeature_valid],target_regionfeature_results[target_regionfeature_valid])
+        # else:
+        #     loss_kd = F.l1_loss(semseg_pred_logits,target_regionfeature_results)
         return {"loss_kd": loss_kd}
+    def _get_src_permutation_idx(self, indices):
+        # permute predictions following indices
+        batch_idx = torch.cat(
+            [torch.full_like(src, i) for i, (src, _) in enumerate(indices)]
+        )
+        src_idx = torch.cat([src for (src, _) in indices])
+        return batch_idx, src_idx

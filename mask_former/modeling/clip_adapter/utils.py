@@ -171,14 +171,14 @@ def crop_with_mask(
     )
 
 
-def build_clip_model(model: str, frozen: bool = True):
+def build_clip_model(model: str, asBackbone: bool = False, frozen: bool = True):
     rank = get_local_rank()
     if rank == 0:
         # download on rank 0 only
-        model, _ = clip.load(model, device="cpu")
+        model, _ = clip.load(model, asBackbone, device="cpu")
     synchronize()
     if rank != 0:
-        model, _ = clip.load(model, device="cpu")
+        model, _ = clip.load(model, asBackbone, device="cpu")
     synchronize()
     if frozen:
         for param in model.parameters():

@@ -15,6 +15,21 @@ from detectron2.structures import ImageList
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
 
+# clip image encoder as backbone
+# from ..clip_adapter.utils import build_clip_model
+def build_clip_model(model: str, asBackbone: bool = False, frozen: bool = True):
+    rank = get_local_rank()
+    if rank == 0:
+        # download on rank 0 only
+        model, _ = clip.load(model, asBackbone, device="cpu")
+    synchronize()
+    if rank != 0:
+        model, _ = clip.load(model, asBackbone, device="cpu")
+    synchronize()
+    if frozen:
+        for param in model.parameters():
+            param.requires_grad = False
+    return model
 
 @META_ARCH_REGISTRY.register()
 class MaskFormer(nn.Module):
@@ -26,6 +41,7 @@ class MaskFormer(nn.Module):
     def __init__(
         self,
         *,
+        clipAsBackbone: bool,
         backbone: Backbone,
         sem_seg_head: nn.Module,
         criterion: nn.Module,
@@ -61,6 +77,9 @@ class MaskFormer(nn.Module):
                 the per-channel mean and std to be used to normalize the input image
         """
         super().__init__()
+        # clip image encoder作为backbone
+        self.clipAsBackbone = clipAsBackbone
+        #
         self.backbone = backbone
         self.sem_seg_head = sem_seg_head
         self.criterion = criterion
@@ -81,7 +100,13 @@ class MaskFormer(nn.Module):
 
     @classmethod
     def from_config(cls, cfg):
-        backbone = build_backbone(cfg)
+        clipAsBackbone = cfg.MODEL.BACKBONE_CLIP
+        if cfg.MODEL.BACKBONE_CLIP:
+            clip_model_name = cfg.MODEL.CLIP_ADAPTER.REGION_CLIP_ADAPTER.CLIP_MODEL_NAME
+            # clipAsBackbone = True
+            backbone = build_clip_model(clip_model_name, clipAsBackbone)
+        else:
+            backbone = build_backbone(cfg)
         sem_seg_head = build_sem_seg_head(cfg, backbone.output_shape())
 
         # Loss parameters:
@@ -117,6 +142,9 @@ class MaskFormer(nn.Module):
         )
 
         return {
+            # clip image encoder as backbone
+            "clipAsBackbone": clipAsBackbone,
+            #
             "backbone": backbone,
             "sem_seg_head": sem_seg_head,
             "criterion": criterion,
@@ -167,7 +195,7 @@ class MaskFormer(nn.Module):
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
-
+        
         features = self.backbone(images.tensor)
         outputs = self.sem_seg_head(features)
 

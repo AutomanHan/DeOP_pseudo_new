@@ -9,3 +9,5 @@ from .heads.per_pixel_baseline import (
     ZeroPerPixelBaselineHead,
 )
 from .heads.pixel_decoder import BasePixelDecoder
+
+# from .clip_adapter.utils import build_clip_model

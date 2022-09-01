@@ -133,6 +133,7 @@ class TransformerPredictor(nn.Module):
                 "lbqc,bchw->lbqhw", mask_embed, mask_features
             )
             out["pred_masks"] = outputs_seg_masks[-1]
+            
             out["aux_outputs"] = self._set_aux_loss(
                 outputs_class if self.mask_classification else None, outputs_seg_masks
             )

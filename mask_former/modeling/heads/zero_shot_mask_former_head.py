@@ -117,10 +117,19 @@ class ZeroShotMaskFormerHead(nn.Module):
         return self.layers(features)
 
     def layers(self, features):
-        (
-            mask_features,
-            transformer_encoder_features,
-        ) = self.pixel_decoder.forward_features(features)
+        if isinstance(features, List):
+            features_imageendoder = features[0]
+            features_det = features[1]
+            (
+                mask_features,
+                transformer_encoder_features
+            ) = self.pixel_decoder.forward_features(features_imageendoder)
+        else:
+            (
+                mask_features,
+                transformer_encoder_features,
+            ) = self.pixel_decoder.forward_features(features)
+        
         if self.transformer_in_feature == "transformer_encoder":
             assert (
                 transformer_encoder_features is not None

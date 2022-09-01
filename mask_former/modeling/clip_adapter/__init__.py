@@ -8,6 +8,7 @@ from .text_prompt import (
     LearnablePromptExtractor,
 )
 from .adapter import ClipAdapter, MaskFormerClipAdapter, PerPixelClipAdapter
+# from .utils import *
 
 
 def build_prompt_learner(cfg):

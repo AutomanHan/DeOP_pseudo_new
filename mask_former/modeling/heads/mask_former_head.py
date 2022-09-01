@@ -121,6 +121,7 @@ class MaskFormerHead(nn.Module):
             mask_features,
             transformer_encoder_features,
         ) = self.pixel_decoder.forward_features(features)
+        
         if self.transformer_in_feature == "transformer_encoder":
             assert (
                 transformer_encoder_features is not None

@@ -105,7 +105,7 @@ def available_models() -> List[str]:
 
 
 def load(
-    name: str,
+    name: str, asBackbone: bool = False, 
     device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
     jit=False,
 ):

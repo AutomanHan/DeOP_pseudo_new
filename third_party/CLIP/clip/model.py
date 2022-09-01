@@ -280,7 +280,25 @@ class Transformer(nn.Module):
             x = block(x, **kwargs)
         return x
 
-
+def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
+    # type: (Tensor, float, float, float, float) -> Tensor
+    r"""Fills the input Tensor with values drawn from a truncated
+    normal distribution. The values are effectively drawn from the
+    normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
+    with values outside :math:`[a, b]` redrawn until they are within
+    the bounds. The method used for generating the random values works
+    best when :math:`a \leq \text{mean} \leq b`.
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        mean: the mean of the normal distribution
+        std: the standard deviation of the normal distribution
+        a: the minimum cutoff value
+        b: the maximum cutoff value
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.trunc_normal_(w)
+    """
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 class VisionTransformer(nn.Module):
     def __init__(
         self,
@@ -290,6 +308,7 @@ class VisionTransformer(nn.Module):
         layers: int,
         heads: int,
         output_dim: int,
+        asBackbone: bool = False,
     ):
         super().__init__()
         self.input_resolution = input_resolution
@@ -314,6 +333,16 @@ class VisionTransformer(nn.Module):
 
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
+        # clip image encoder 作为 maskfomer backbone 并修改为yolos样式
+        self.asBackbone = asBackbone
+        if self.asBackbone:
+            det_token_num = 100
+            self.det_token_num = det_token_num
+            self.det_token = nn.Parameter(torch.zeros(1, det_token_num, width))
+            self.det_token = trunc_normal_(self.det_token, std=.02)
+            det_pos_embed = torch.zeros(1, det_token_num, width)
+            det_pos_embed = trunc_normal_(det_pos_embed, std=.02)
+            self.det_pos_embed = det_pos_embed
 
     def forward(
         self,
@@ -411,8 +440,10 @@ class VisionTransformer(nn.Module):
                         .to(positional_embedding.device)
                     )
                 per_pos_embedding = torch.cat(all_rel_pos_bias, dim=-1)
-
-            positional_embedding = torch.cat([cls_pos, per_pos_embedding])
+            if self.asBackbone:
+                positional_embedding =torch.cat([cls_pos, per_pos_embedding, self.det_pos_embed])
+            else:
+                positional_embedding = torch.cat([cls_pos, per_pos_embedding])
         x = x + positional_embedding.to(x.dtype)
         x = self.ln_pre(x)
 
@@ -431,14 +462,25 @@ class VisionTransformer(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
 
         if return_cls:
-            x = self.ln_post(x[:, 0, :])
+            if self.asBackbone:
+                tmp_cls_token = x[:, 0, :]
+                tmp_det_token = x[:, -self.det_token_num:, :]
+                tmp_out = torch.cat([tmp_cls_token, tmp_det_token])
+                x = self.ln_post(tmp_out)
+            else:
+                x = self.ln_post(x[:, 0, :])
         else:
             x = self.ln_post(x[:, 1:, :])
 
         if self.proj is not None:
             x = x @ self.proj
         if not return_cls:
-            x = x.reshape(b, gh, gw, -1)
+            if self.asBackbone:
+                x_feature = x[:,:-self.det_token_num, :].reshape(b, gh, gw, -1)
+                x_det_feature = x[:, -self.det_token_num:, :]
+                return x_feature, x_det_feature
+            else:
+                x = x.reshape(b, gh, gw, -1)
         return x
 
 
@@ -457,12 +499,14 @@ class CLIP(nn.Module):
         transformer_width: int,
         transformer_heads: int,
         transformer_layers: int,
+        # as maskformer backbone
+        asBackbone: bool = False,
     ):
         super().__init__()
 
         self.context_length = context_length
-
         if isinstance(vision_layers, (tuple, list)):
+
             vision_heads = vision_width * 32 // 64
             self.visual = ModifiedResNet(
                 layers=vision_layers,
@@ -480,6 +524,8 @@ class CLIP(nn.Module):
                 layers=vision_layers,
                 heads=vision_heads,
                 output_dim=embed_dim,
+                # clip image encoder 作为 maskfomer backbone
+                asBackbone=asBackbone,
             )
 
         self.transformer = Transformer(
@@ -498,7 +544,8 @@ class CLIP(nn.Module):
 
         self.text_projection = nn.Parameter(torch.empty(transformer_width, embed_dim))
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-
+        # clip image encoder 作为 maskfomer backbone
+        # self.asBackbone = asBackbone
         self.initialize_parameters()
 
     def initialize_parameters(self):
@@ -613,7 +660,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict):
+def build_model(state_dict: dict, asBackbone: bool=False):
     vit = "visual.proj" in state_dict
 
     if vit:
