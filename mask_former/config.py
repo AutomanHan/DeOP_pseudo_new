@@ -36,6 +36,11 @@ def add_mask_former_default_config(cfg):
     cfg.MODEL.MASK_FORMER.CLIP_KD_LOSS = False
     cfg.MODEL.MASK_FORMER.CLIP_KD_PROJ = False
 
+    # 评估mask proposal质量：
+    cfg.MODEL.EVALUATIONTYPE = CN()
+    cfg.MODEL.EVALUATIONTYPE.SEG_AP = False
+    cfg.MODEL.EVALUATIONTYPE.SEG_AP_OUTPUT = False
+
     # backbone修改为clip image encoder
     cfg.MODEL.BACKBONE_CLIP = False
 

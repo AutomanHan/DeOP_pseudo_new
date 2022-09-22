@@ -26,6 +26,7 @@ class ZeroShotTransformerPredictor(TransformerPredictor):
         deep_supervision: bool,
         mask_dim: int,
         enforce_input_project: bool,
+        clipAsBackbone:bool,
     ):
         super().__init__(
             in_channels,
@@ -42,6 +43,8 @@ class ZeroShotTransformerPredictor(TransformerPredictor):
             deep_supervision=deep_supervision,
             mask_dim=mask_dim,
             enforce_input_project=enforce_input_project,
+            # clip image encoder 作为backbone
+            clipAsBackbone =clipAsBackbone, 
         )
         self.mask_classification = mask_classification
         # output FFNs
@@ -78,5 +81,8 @@ class ZeroShotTransformerPredictor(TransformerPredictor):
         ret["enforce_input_project"] = cfg.MODEL.MASK_FORMER.ENFORCE_INPUT_PROJ
 
         ret["mask_dim"] = cfg.MODEL.SEM_SEG_HEAD.MASK_DIM
+
+        # clip image encoder 作为backbone
+        ret["clipAsBackbone"] = cfg.MODEL.BACKBONE_CLIP
 
         return ret

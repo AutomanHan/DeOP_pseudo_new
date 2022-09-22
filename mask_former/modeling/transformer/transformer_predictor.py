@@ -31,6 +31,9 @@ class TransformerPredictor(nn.Module):
         deep_supervision: bool,
         mask_dim: int,
         enforce_input_project: bool,
+        
+        #clip as backbone
+        clipAsBackbone:bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -55,26 +58,31 @@ class TransformerPredictor(nn.Module):
 
         self.mask_classification = mask_classification
 
+         # clip as backbone
+        self.clipAsBackbone = clipAsBackbone
+
+
         # positional encoding
         N_steps = hidden_dim // 2
-        self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
+        if not self.clipAsBackbone:
+            self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
 
-        transformer = Transformer(
-            d_model=hidden_dim,
-            dropout=dropout,
-            nhead=nheads,
-            dim_feedforward=dim_feedforward,
-            num_encoder_layers=enc_layers,
-            num_decoder_layers=dec_layers,
-            normalize_before=pre_norm,
-            return_intermediate_dec=deep_supervision,
-        )
+            transformer = Transformer(
+                d_model=hidden_dim,
+                dropout=dropout,
+                nhead=nheads,
+                dim_feedforward=dim_feedforward,
+                num_encoder_layers=enc_layers,
+                num_decoder_layers=dec_layers,
+                normalize_before=pre_norm,
+                return_intermediate_dec=deep_supervision,
+            )
 
-        self.num_queries = num_queries
-        self.transformer = transformer
-        hidden_dim = transformer.d_model
+            self.num_queries = num_queries
+            self.transformer = transformer
+            hidden_dim = transformer.d_model
 
-        self.query_embed = nn.Embedding(num_queries, hidden_dim)
+            self.query_embed = nn.Embedding(num_queries, hidden_dim)
 
         if in_channels != hidden_dim or enforce_input_project:
             self.input_proj = Conv2d(in_channels, hidden_dim, kernel_size=1)
@@ -87,6 +95,12 @@ class TransformerPredictor(nn.Module):
         if self.mask_classification:
             self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
         self.mask_embed = MLP(hidden_dim, hidden_dim, mask_dim, 3)
+
+       
+        if self.clipAsBackbone:
+            self.proj_det_token = nn.Linear(512, 256)
+        
+
 
     @classmethod
     def from_config(cls, cfg, in_channels, mask_classification):
@@ -109,23 +123,34 @@ class TransformerPredictor(nn.Module):
 
         ret["mask_dim"] = cfg.MODEL.SEM_SEG_HEAD.MASK_DIM
 
+
+        # clip image encoder 作为backbone
+        ret["clipAsBackbone"] = cfg.MODEL.BACKBONE_CLIP
+
         return ret
 
     def forward(self, x, mask_features):
-        pos = self.pe_layer(x)
+        
+        if not self.clipAsBackbone:
+            pos = self.pe_layer(x)
 
         src = x
         mask = None
-        hs, memory = self.transformer(
-            self.input_proj(src), mask, self.query_embed.weight, pos
-        )
+        if self.clipAsBackbone: #det_token中已经是decoder之后的了，不需要再过transformer的decoder部分了
+            hs = F.relu(self.proj_det_token(x))
+            hs = hs.unsqueeze(0)
+
+        else:
+            hs, memory = self.transformer(
+                self.input_proj(src), mask, self.query_embed.weight, pos
+            )
 
         if self.mask_classification:
             outputs_class = self.class_embed(hs)
             out = {"pred_logits": outputs_class[-1]}
         else:
             out = {}
-
+        # import pdb; pdb.set_trace()
         if self.aux_loss:
             # [l, bs, queries, embed]
             mask_embed = self.mask_embed(hs)

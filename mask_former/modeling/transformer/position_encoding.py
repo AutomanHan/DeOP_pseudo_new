@@ -29,6 +29,7 @@ class PositionEmbeddingSine(nn.Module):
         self.scale = scale
 
     def forward(self, x, mask=None):
+        # import pdb; pdb.set_trace()
         if mask is None:
             mask = torch.zeros(
                 (x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool

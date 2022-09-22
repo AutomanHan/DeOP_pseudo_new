@@ -65,6 +65,7 @@ class GeneralizedSemSegEvaluator(SemSegEvaluator):
                 output["sem_seg"], image=np.array(Image.open(input["file_name"]))
             )
             output = output.argmax(dim=0).to(self._cpu_device)
+            # import pdb; pdb.set_trace()
             pred = np.array(output, dtype=np.int)
             with PathManager.open(
                 self.input_file_to_gt_file[input["file_name"]], "rb"

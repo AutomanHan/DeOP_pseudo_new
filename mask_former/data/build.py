@@ -50,6 +50,7 @@ def print_classification_instances_class_histogram(dataset_dicts, class_names):
     histogram = np.zeros((num_classes,), dtype=np.int)
     for entry in dataset_dicts:
         classes = np.asarray([entry["category_id"]], dtype=np.int)
+        # print(classes, entry)
         if len(classes):
             assert classes.min() >= 0, f"Got an invalid category_id={classes.min()}"
             assert (
@@ -121,6 +122,7 @@ def get_detection_dataset_dicts(
     if isinstance(names, str):
         names = [names]
     assert len(names), names
+    # import pdb; pdb.set_trace()
     dataset_dicts = [
         wrap_metas(DatasetCatalog.get(dataset_name), dataset_name=dataset_name)
         for dataset_name in names
@@ -135,7 +137,7 @@ def get_detection_dataset_dicts(
             load_proposals_into_dataset(dataset_i_dicts, proposal_file)
             for dataset_i_dicts, proposal_file in zip(dataset_dicts, proposal_files)
         ]
-
+    # print(dataset_dicts)
     dataset_dicts = list(itertools.chain.from_iterable(dataset_dicts))
 
     has_instances = "annotations" in dataset_dicts[0]

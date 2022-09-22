@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import fvcore.nn.weight_init as weight_init
 from torch import nn
 from torch.nn import functional as F
+import torch
 
 from detectron2.config import configurable
 from detectron2.layers import Conv2d, ShapeSpec, get_norm
@@ -63,6 +64,8 @@ class ZeroShotMaskFormerHead(nn.Module):
         # extra parameters
         transformer_predictor: nn.Module,
         transformer_in_feature: str,
+        # clip image encoder作为backbone
+        clipAsBackbone: bool,
     ):
         """
         NOTE: this interface is experimental.
@@ -91,6 +94,30 @@ class ZeroShotMaskFormerHead(nn.Module):
 
         self.num_classes = num_classes
 
+        # clip image encoder作为backbone
+        self.clipAsBackbone = clipAsBackbone
+        if self.clipAsBackbone:
+            dim = 512  # clip vit16 输出维度，可能需要修改
+            out_dim = dim // 4 
+            out_channels = 512  # 最终输出维度
+
+            self.clipOutUpsampel = nn.Sequential(
+                nn.ConvTranspose2d(dim, dim // 2, kernel_size=2, stride=2),
+                # get_norm("LN", dim // 2),
+                LayerNorm(dim//2),
+                nn.GELU(),
+                nn.ConvTranspose2d(dim // 2, dim // 4, kernel_size=2, stride=2),
+                
+                Conv2d(out_dim, out_channels, kernel_size=1, bias=False,
+                # norm=get_norm("LN", out_channels),
+                norm = LayerNorm(out_channels),
+                ),
+                Conv2d(out_channels,  out_channels, kernel_size=3, padding=1, bias=False, 
+                # norm=get_norm("LN", out_channels),
+                norm = LayerNorm(out_channels),
+                ),
+            )
+
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
         return {
@@ -111,6 +138,8 @@ class ZeroShotMaskFormerHead(nn.Module):
                 else input_shape[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels,
                 mask_classification=True,
             ),
+            # clip image encoder 作为backbone
+            "clipAsBackbone":cfg.MODEL.BACKBONE_CLIP,
         }
 
     def forward(self, features):
@@ -118,12 +147,13 @@ class ZeroShotMaskFormerHead(nn.Module):
 
     def layers(self, features):
         if isinstance(features, List):
-            features_imageendoder = features[0]
+            features_imageendoder = features[0].permute(0,3,1,2)
             features_det = features[1]
+            features_imageendoder = self.clipOutUpsampel(features_imageendoder)
             (
                 mask_features,
-                transformer_encoder_features
-            ) = self.pixel_decoder.forward_features(features_imageendoder)
+                transformer_encoder_features 
+            ) = self.pixel_decoder.forward_features({"res5":features_imageendoder})
         else:
             (
                 mask_features,
@@ -136,9 +166,14 @@ class ZeroShotMaskFormerHead(nn.Module):
             ), "Please use the TransformerEncoderPixelDecoder."
             predictions = self.predictor(transformer_encoder_features, mask_features)
         else:
-            predictions = self.predictor(
-                features[self.transformer_in_feature], mask_features
-            )
+            if self.clipAsBackbone:
+                predictions = self.predictor(
+                    features_det, mask_features
+                )
+            else:
+                predictions = self.predictor(
+                    features[self.transformer_in_feature], mask_features
+                )
         return predictions
 
     def freeze_pretrained(self):
@@ -148,3 +183,26 @@ class ZeroShotMaskFormerHead(nn.Module):
                     param.requires_grad = False
             else:
                 module.freeze_pretrained()
+
+
+class LayerNorm(nn.Module):
+    """
+    A LayerNorm variant, popularized by Transformers, that performs point-wise mean and
+    variance normalization over the channel dimension for inputs that have shape
+    (batch_size, channels, height, width).
+    https://github.com/facebookresearch/ConvNeXt/blob/d1fa8f6fef0a165b27399986cc2bdacc92777e40/models/convnext.py#L119  # noqa B950
+    """
+
+    def __init__(self, normalized_shape, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(normalized_shape))
+        self.bias = nn.Parameter(torch.zeros(normalized_shape))
+        self.eps = eps
+        self.normalized_shape = (normalized_shape,)
+
+    def forward(self, x):
+        u = x.mean(1, keepdim=True)
+        s = (x - u).pow(2).mean(1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.eps)
+        x = self.weight[:, None, None] * x + self.bias[:, None, None]
+        return x

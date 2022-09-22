@@ -21,13 +21,16 @@ MODEL:
     CLIP_KD_WEIGHT: 10.0
     CLIP_KD_LOSS: True
   
+  EVALUATIONTYPE:
+    SEG_AP: False
+  
 OUTPUT_DIR: "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/hancong/code/pretrain/ov-seg/zsseg.baseline/prompt/output0817/R101c_learned_prompt_bs32_60k_newdata"
 DATASETS:
   #TRAIN: ("coco_2017_train_stuff_base_sem_seg",)
   TEST: ("coco_2017_test_stuff_base_sem_seg", "coco_2017_test_stuff_novel_sem_seg", "coco_2017_test_stuff_sem_seg")
   TEST: ("coco_2017_test_stuff_sem_seg",)
 SOLVER:
-  # IMS_PER_BATCH: 4
+  IMS_PER_BATCH: 4
   TEST_IMS_PER_BATCH: 2
 TEST:
   EVAL_PERIOD: 20000

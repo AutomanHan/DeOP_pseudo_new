@@ -24,7 +24,7 @@ DATASETS:
   TEST: ("coco_2017_test_stuff_base_sem_seg", "coco_2017_test_stuff_novel_sem_seg", "coco_2017_test_stuff_sem_seg")
   TEST: ("coco_2017_test_stuff_sem_seg",)
 SOLVER:
-  IMS_PER_BATCH: 4
-  TEST_IMS_PER_BATCH: 2
+  # IMS_PER_BATCH: 4
+  TEST_IMS_PER_BATCH: 8
 TEST:
   EVAL_PERIOD: 20000

@@ -178,9 +178,13 @@ class ZeroShotMaskFormer(MaskFormer):
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
+        
         # clip image encoder 作为backbone
+        # import pdb; pdb.set_trace()
         if self.clipAsBackbone:
-            features, det_features = self.backbone.visual(images.tensor)
+            features, det_features = self.backbone.visual(images.tensor, return_cls = False)
+            # outputs = self.sem_seg_head([{"res5",features}, det_features])
+            # import pdb; pdb.set_trace()
             outputs = self.sem_seg_head([features, det_features])
         else:
             features = self.backbone(images.tensor)
@@ -198,6 +202,7 @@ class ZeroShotMaskFormer(MaskFormer):
             semseg_pred_logits = outputs["pred_logits"]
             
         # import pdb; pdb.set_trace()
+        # print("forward finish")
 
         outputs["pred_logits"] = self.clip_adapter.get_sim_logits(
             text_features, self.clip_adapter.normalize_feature(outputs["pred_logits"])
@@ -230,7 +235,7 @@ class ZeroShotMaskFormer(MaskFormer):
                 target_regionfeature_results, target_regionfeature_valid= self.kd_region_feature(semseg_pred_mask,batched_inputs, images)
                 outputs["clip_region_logits"] = target_regionfeature_results
                 outputs["clip_region_valid"] = target_regionfeature_valid
-            losses.update(self.kd_loss_cal(output=outputs, indices=indicesSrc))
+                losses.update(self.kd_loss_cal(output=outputs, indices=indicesSrc))
             # import pdb; pdb.set_trace()
             for k in list(losses.keys()):
                 if k in self.criterion.weight_dict:
@@ -238,6 +243,7 @@ class ZeroShotMaskFormer(MaskFormer):
                 else:
                     # remove this loss if not specified in `weight_dict`
                     losses.pop(k)
+            # print(losses)
 
             return losses
         else:
@@ -268,7 +274,10 @@ class ZeroShotMaskFormer(MaskFormer):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
                 r = sem_seg_postprocess(r, image_size, height, width)
-                processed_results.append({"sem_seg": r})
+                processed_results.append({"sem_seg": r, "pred_masks":mask_pred_result})
+
+                # evluate ap:
+                # processed_results.append({})
 
                 # panoptic segmentation inference
                 if self.panoptic_on:

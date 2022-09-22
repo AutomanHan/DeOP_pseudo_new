@@ -11,9 +11,11 @@ import logging
 import os
 from collections import OrderedDict
 from typing import Any, Dict, List, Set
+import time
 
 import detectron2.utils.comm as comm
 import torch
+from detectron2.utils.events import EventStorage
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog
@@ -22,6 +24,8 @@ from detectron2.engine import (
     default_argument_parser,
     default_setup,
     launch,
+    create_ddp_model,
+    AMPTrainer, SimpleTrainer, TrainerBase,
 )
 from detectron2.evaluation import (
     CityscapesSemSegEvaluator,
@@ -33,6 +37,8 @@ from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter
+
+import weakref
 
 # MaskFormer
 from mask_former import SemanticSegmentorWithTTA, add_mask_former_config
@@ -52,8 +58,7 @@ from mask_former.evaluation import (
     GeneralizedSemSegEvaluator,
     GeneralizedPseudoSemSegEvaluator,
     ClassificationEvaluator,
-    GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen,
-    GeneralizedSemSegEvaluatorClassAgnosticOutput,
+    GeneralizedSemSegEvaluatorClassAgnostic,
 )
 from mask_former.utils.events import WandbWriter, setup_wandb
 from mask_former.utils.post_process_utils import dense_crf_post_process
@@ -63,6 +68,39 @@ class Trainer(DefaultTrainer):
     """
     Extension of the Trainer class adapted to DETR.
     """
+    def __init__(self, cfg):
+        """
+        Args:
+            cfg (CfgNode):
+        """
+        super(DefaultTrainer,self).__init__()
+        logger = logging.getLogger("detectron2")
+        if not logger.isEnabledFor(logging.INFO):  # setup_logger is not called for d2
+            setup_logger()
+        cfg = DefaultTrainer.auto_scale_workers(cfg, comm.get_world_size())
+
+        # Assume these objects must be constructed in this order.
+        model = self.build_model(cfg)
+        optimizer = self.build_optimizer(cfg, model)
+        data_loader = self.build_train_loader(cfg)
+
+        model = create_ddp_model(model, broadcast_buffers=False,find_unused_parameters=True)
+        self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else SimpleTrainer)(
+            model, data_loader, optimizer
+        )
+
+        self.scheduler = self.build_lr_scheduler(cfg, optimizer)
+        self.checkpointer = DetectionCheckpointer(
+            # Assume you want to save checkpoints together with logs/statistics
+            model,
+            cfg.OUTPUT_DIR,
+            trainer=weakref.proxy(self),
+        )
+        self.start_iter = 0
+        self.max_iter = cfg.SOLVER.MAX_ITER
+        self.cfg = cfg
+
+        self.register_hooks(self.build_hooks())
 
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
@@ -86,13 +124,10 @@ class Trainer(DefaultTrainer):
                 )
             else:
                 if cfg.MODEL.EVALUATIONTYPE.SEG_AP:
-                    evaluator = GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen
-                    if cfg.MODEL.EVALUATIONTYPE.SEG_AP_OUTPUT:
-                        evaluator = GeneralizedSemSegEvaluatorClassAgnosticOutput
+                    evaluator = GeneralizedSemSegEvaluatorClassAgnostic
                 else:
                     evaluator = GeneralizedSemSegEvaluator
                 
-                # evaluator = GeneralizedSemSegEvaluator
             evaluator_list.append(
                 evaluator(
                     dataset_name,
@@ -183,7 +218,7 @@ class Trainer(DefaultTrainer):
             # It may not always print what you want to see, since it prints "common" metrics only.
             CommonMetricPrinter(self.max_iter),
             JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
-            # WandbWriter(),
+            #WandbWriter(),
         ]
 
     @classmethod
@@ -218,7 +253,9 @@ class Trainer(DefaultTrainer):
         )
 
         params: List[Dict[str, Any]] = []
+        # params = []
         memo: Set[torch.nn.parameter.Parameter] = set()
+        # memo = set()
         for module_name, module in model.named_modules():
             for module_param_name, value in module.named_parameters(recurse=False):
                 if not value.requires_grad:
@@ -279,6 +316,89 @@ class Trainer(DefaultTrainer):
             optimizer = maybe_add_gradient_clipping(cfg, optimizer)
         return optimizer
 
+    def train(self):
+        """
+        Args:
+            start_iter, max_iter (int): See docs above
+        """
+        start_iter = self.start_iter
+        max_iter = self.max_iter
+        logger = logging.getLogger(__name__)
+        logger.info("Starting training from iteration {}".format(start_iter))
+
+        self.iter = self.start_iter = start_iter
+        self.max_iter = max_iter
+
+        with EventStorage(start_iter) as self.storage:
+            try:
+                self.before_train()
+                for self.iter in range(start_iter, max_iter):
+                    self.before_step()
+                    self.run_step()
+                    for name, param in self.model.named_parameters():
+                        if param.grad is None:
+                            pass
+                            # print(name)
+                    self.after_step()
+                # self.iter == max_iter can be used by `after_train` to
+                # tell whether the training successfully finished or failed
+                # due to exceptions.
+                self.iter += 1
+                # import pdb; pdb.set_trace()
+                
+            except Exception:
+                logger.exception("Exception during training:")
+                raise
+            finally:
+                self.after_train()
+        if len(self.cfg.TEST.EXPECTED_RESULTS) and comm.is_main_process():
+            assert hasattr(
+                self, "_last_eval_results"
+            ), "No evaluation results obtained during training!"
+            verify_results(self.cfg, self._last_eval_results)
+            return self._last_eval_results
+    '''
+    def run_step(self):
+        """
+        Implement the standard training logic described above.
+        """
+        assert self.model.training, "[SimpleTrainer] model was changed to eval mode!"
+        start = time.perf_counter()
+        """
+        If you want to do something with the data, you can wrap the dataloader.
+        """
+        data = next(self._data_loader_iter)
+        data_time = time.perf_counter() - start
+
+        """
+        If you want to do something with the losses, you can wrap the model.
+        """
+        loss_dict = self.model(data)
+        if isinstance(loss_dict, torch.Tensor):
+            losses = loss_dict
+            loss_dict = {"total_loss": loss_dict}
+        else:
+            losses = sum(loss_dict.values())
+
+        """
+        If you need to accumulate gradients or do something similar, you can
+        wrap the optimizer with your custom `zero_grad()` method.
+        """
+        self.optimizer.zero_grad()
+        losses.backward()
+        for name, param in self.model.named_parameters():
+            if param.grad is None:
+                print(name)
+        self._write_metrics(loss_dict, data_time)
+
+        """
+        If you need gradient clipping/scaling or other processing, you can
+        wrap the optimizer with your custom `step()` method. But it is
+        suboptimal as explained in https://arxiv.org/abs/2006.15704 Sec 3.2.4
+        """
+        self.optimizer.step()
+        '''
+
     @classmethod
     def test_with_TTA(cls, cfg, model):
         logger = logging.getLogger("detectron2.trainer")
@@ -310,7 +430,7 @@ def setup(args):
     default_setup(cfg, args)
     # Setup logger for "mask_former" module
     # if not args.eval_only:
-    #     setup_wandb(cfg, args)
+        # setup_wandb(cfg, args)
     setup_logger(
         output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="mask_former"
     )
@@ -336,6 +456,7 @@ def main(args):
 
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume=args.resume)
+    torch.autograd.set_detect_anomaly(True)
     return trainer.train()
 
 

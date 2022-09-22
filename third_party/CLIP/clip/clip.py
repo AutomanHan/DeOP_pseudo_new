@@ -130,6 +130,7 @@ def load(
     preprocess : Callable[[PIL.Image], torch.Tensor]
         A torchvision transform that converts a PIL image into a tensor that the returned model can take as its input
     """
+    print("load clip model ", name)
     if name in _MODELS:
         model_path = _download(_MODELS[name])
     elif os.path.isfile(name):
@@ -157,7 +158,7 @@ def load(
     if not jit:
         print("not jit")
         # print(model.state_dict())
-        model = build_model(state_dict or model.state_dict()).to(device)
+        model = build_model(state_dict or model.state_dict(),asBackbone=asBackbone).to(device)
 
         if str(device) == "cpu":
             model.float()

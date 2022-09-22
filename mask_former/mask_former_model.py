@@ -11,6 +11,8 @@ from detectron2.modeling import META_ARCH_REGISTRY, build_backbone, build_sem_se
 from detectron2.modeling.backbone import Backbone
 from detectron2.modeling.postprocessing import sem_seg_postprocess
 from detectron2.structures import ImageList
+from detectron2.utils.comm import get_local_rank,synchronize
+import clip
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
@@ -26,9 +28,16 @@ def build_clip_model(model: str, asBackbone: bool = False, frozen: bool = True):
     if rank != 0:
         model, _ = clip.load(model, asBackbone, device="cpu")
     synchronize()
+    # import pdb; pdb.set_trace()
     if frozen:
-        for param in model.parameters():
-            param.requires_grad = False
+        if asBackbone:
+            for nameParam in model.named_parameters():
+                if not nameParam[0] in ["visual.det_token"]:
+                    nameParam[1].requires_grad = False
+        else:
+            for param in model.parameters():
+                param.requires_grad = False
+    # import pdb; pdb.set_trace()
     return model
 
 @META_ARCH_REGISTRY.register()
@@ -101,9 +110,12 @@ class MaskFormer(nn.Module):
     @classmethod
     def from_config(cls, cfg):
         clipAsBackbone = cfg.MODEL.BACKBONE_CLIP
+        print("mask former model: ", clipAsBackbone)
         if cfg.MODEL.BACKBONE_CLIP:
-            clip_model_name = cfg.MODEL.CLIP_ADAPTER.REGION_CLIP_ADAPTER.CLIP_MODEL_NAME
+            clip_model_name = cfg.MODEL.CLIP_ADAPTER.CLIP_MODEL_NAME
             # clipAsBackbone = True
+            # print("maskformer model: ", clip_model_name)
+            # import pdb; pdb.set_trace()
             backbone = build_clip_model(clip_model_name, clipAsBackbone)
         else:
             backbone = build_backbone(cfg)

@@ -26,11 +26,20 @@ demand_id = 1748
 
 [roles]
 workers = 1
-worker.memory = 180480
-worker.vcore = 64
-worker.gcores32g = 8
+#worker.memory = 90480
+#worker.memory = 180480
+worker.memory = 20480
+#worker.vcore = 48
+#worker.vcore = 64
+worker.vcore = 8
+#worker.gcores32g = 4
+#worker.gcores32g = 8
+worker.gcores32g = 1
 ## worker启动后执行的脚本，一般为训练作业的执行命令
-worker.script = sh train_learned_prompts_maskformer_kd_image_loss10_proj.sh
+worker.script = sh train_learned_prompts_maskformer_voc.sh
+#worker.script = sh train_learn_prompts_voc.sh
+#worker.script = sh train_learned_prompts_maskformer_clipbackbone.sh
+#worker.script = sh train_learned_prompts_maskformer_kd_image_loss10_proj.sh
 #worker.script = sh train_learned_prompts_maskformer_kd_image_loss50.sh
 #worker.script = sh train_learned_prompts_maskformer_kd_image_loss20.sh
 #worker.script = sh train_learned_prompts_maskformer_kd_image_loss10.sh
