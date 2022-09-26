@@ -191,8 +191,6 @@ class ZeroShotMaskFormer(MaskFormer):
             outputs = self.sem_seg_head(features)
         # features = self.backbone(images.tensor)
         
-            
-        
         class_names = self.get_class_name_list(dataset_name)
         text_features = self.clip_adapter.get_text_features(class_names)
 
@@ -326,6 +324,7 @@ class ZeroShotMaskFormer(MaskFormer):
             )
             if clip_cls is None:
                 clip_cls = torch.empty(0, mask_cls.shape[-1] + 1, device=self.device)
+            # import pdb; pdb.set_trace()
             # softmax before index or after?
             clip_cls = F.softmax(clip_cls[:, :-1], dim=-1)
             if self.clip_ensemble_weight > 0:

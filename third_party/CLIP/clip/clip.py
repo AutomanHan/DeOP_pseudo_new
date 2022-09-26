@@ -158,7 +158,8 @@ def load(
     if not jit:
         print("not jit")
         # print(model.state_dict())
-        model = build_model(state_dict or model.state_dict(),asBackbone=asBackbone).to(device)
+        # model = build_model(state_dict or model.state_dict(),asBackbone=asBackbone).to(device)
+        model = build_model(state_dict or model.state_dict()).to(device)
 
         if str(device) == "cpu":
             model.float()
