@@ -19,5 +19,5 @@ python3 /mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/hancong/code/pretrain/ov
 --eval-only --resume \
 MODEL.CLIP_ADAPTER.PROMPT_CHECKPOINT ${TRAINED_PROMPTS} \
 # MODEL.CLIP_ADAPTER.CLIP_ENSEMBLE_WEIGHT -1.0 \
-SOLVER.TEST_IMS_PER_BATCH 6 \
+SOLVER.TEST_IMS_PER_BATCH 4 \
 OUTPUT_DIR ${OutPutDir}
