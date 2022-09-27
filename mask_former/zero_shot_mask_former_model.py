@@ -349,7 +349,7 @@ class ZeroShotMaskFormer(MaskFormer):
                 # only clip model predictions are used
                 mask_cls = clip_cls
                 mask_pred = mask_pred[valid_flag]
-                # mask_pred[mask_pred > 0.5] = 1.0
+                mask_pred[mask_pred > 0.5] = 1.0
         semseg = torch.einsum("qc,qhw->chw", mask_cls, mask_pred)
         return semseg
 
