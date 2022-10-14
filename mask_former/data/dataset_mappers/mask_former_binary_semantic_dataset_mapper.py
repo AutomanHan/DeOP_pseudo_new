@@ -122,6 +122,7 @@ class MaskFormerBinarySemanticDatasetMapper:
             )
 
         aug_input = T.AugInput(image, sem_seg=sem_seg_gt)
+        # import pdb; pdb.set_trace()
         aug_input.category_id = dataset_dict["category_id"]
         aug_input, transforms = T.apply_transform_gens(self.tfm_gens, aug_input)
         image = aug_input.image

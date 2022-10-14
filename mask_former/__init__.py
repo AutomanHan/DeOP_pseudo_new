@@ -6,6 +6,7 @@ from .test_time_augmentation import SemanticSegmentorWithTTA
 from .mask_former_model import MaskFormer
 from .zero_shot_mask_former_model import ZeroShotMaskFormer
 from .proposal_classification import ProposalClipClassifier
+from .proposal_classification_clipfeature import ProposalClipClassifierFeature
 from .ablation.zero_shot_per_pixel_model import ZeroShotPerPixelModel
 from .ablation.oracle_mask_former_model import OracleMaskFormer
 from .ablation.zero_shot_proposal_based_model import ZeroShotProposalBasedSegmentor

@@ -57,13 +57,18 @@ class GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen(SemSegEvaluator):
             else lambda x, **kwargs: x
         )
         self.countIoU = 0
-        self.countAllMask = 0
+        self.countAllMask = 0  # 预测的所有mask数量 针对每个gt， 出现一次后就不在累加
+        self.countAllMaskAll = 0 # 
 
-        self.countIoUSeen = 0
-        # self.countAllMaskSeen = 0
-
-        self.countIoUUnseen = 0
-        # self.countAllMaskUnseen = 0
+        self.countIoUSeen = 0   # 满足iou要求的seen 针对每个gt，出现一次后就不在累加  即gt:pred=1:1但可能不是最佳匹配
+        self.countIoUSeenAllMask = 0   # 满足iou要求的seen  针对每个gt,只要pred mask满足iou条件就累加，即可能出现gt:pred = 1:N
+        self.countSeenAllMask = 0 # 满足iou要求的unseen
+        
+        self.countIoUUnseen = 0   # # 满足iou要求的Unseen 针对每个gt，出现一次后就不在累加  即gt:pred=1:1但可能不是最佳匹配
+        self.countIoUUnseenAllMask = 0 # 满足iou要求的Unseen  针对每个gt,只要pred mask满足iou条件就累加，即可能出现gt:pred = 1:N
+        self.countUnseenAllMask = 0  # gt中unseen mask数量
+        
+        self.count_test = 0
 
     def process(self, inputs, outputs):
         """
@@ -82,6 +87,9 @@ class GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen(SemSegEvaluator):
             # output = output.argmax(dim=0).to(self._cpu_device)
             # # import pdb; pdb.set_trace()
             # pred = np.array(output, dtype=np.int)
+            self.count_test += 1
+            # if self.count_test >5:
+            #     break
             with PathManager.open(
                 self.input_file_to_gt_file[input["file_name"]], "rb"
             ) as f:
@@ -107,32 +115,46 @@ class GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen(SemSegEvaluator):
                 align_corners=False,
             )
             # import pdb; pdb.set_trace()
-            for idx, mask_output in enumerate(masks_output.squeeze(0)):
-                gt_idall = np.unique(gt)
-                mask_out = np.zeros_like(gt)
-                # import pdb; pdb.set_trace()
-                mask_out[mask_output.to("cpu") > 0.5] = 1.0
-                if(np.sum(mask_out)> 0):
-                    self.countAllMask += 1
+            gt_idall = np.unique(gt)
+            for gt_idx in gt_idall:
+                if gt_idx in unseen_trID:
+                    self.countUnseenAllMask += 1
                 else:
-                    continue
-                for gt_idx in gt_idall:
-                    mask_gt = np.zeros_like(gt)
-                    mask_gt[gt == gt_idx] = 1.0
+                    self.countSeenAllMask += 1
+            for gt_idx in gt_idall:
+                mask_gt = np.zeros_like(gt)
+                mask_gt[gt == gt_idx] = 1.0
+                flag_iou = True
+                for idx, mask_output in enumerate(masks_output.squeeze(0)):
+                    mask_out = np.zeros_like(gt)
+                    # import pdb; pdb.set_trace()
+                    mask_out[mask_output.to("cpu") > 0.5] = 1.0
+                    if(np.sum(mask_out)> 0):
+                        if flag_iou:
+                            self.countAllMask += 1
+                        self.countAllMaskAll += 1
+                    else:
+                        continue
+                    
                     mask_uion = mask_out + mask_gt
                     tp = np.sum(mask_uion > 1.5)
                     uion = np.sum(mask_uion > 0.8)
                     if(uion > 0):
                         iou = tp / uion
-                    if iou > 0.5:
+                    if iou > 0.3:
                         self.countIoU += 1
                         if gt_idx in unseen_trID:
-                            self.countIoUUnseen += 1
+                            self.countIoUUnseenAllMask += 1
+                            if flag_iou:
+                                self.countIoUUnseen += 1
                         else:
-                            self.countIoUSeen += 1
-                        break
+                            self.countIoUSeenAllMask +=1 
+                            if flag_iou:
+                                self.countIoUSeen += 1
+                        flag_iou = False
+            # print(f"countIoU: {self.countIoU}, coutIoUSeen: {self.countIoUSeen}, countIoUUnseen: {self.countIoUUnseen}, coutIoUSeenAllMask: {self.countIoUSeenAllMask}, countIoUUnseenAllMask: {self.countIoUUnseenAllMask}, countSeenAllMask: {self.countSeenAllMask}, countUnseenAllMask: {self.countUnseenAllMask}, countAllMask: {self.countAllMask}, countAllMaskAll: {self.countAllMaskAll}")
 
-            print(f"countIoU: {self.countIoU}, coutIoUSeen: {self.countIoUSeen}, countIoUUnseen: {self.countIoUUnseen},  countAllMask: {self.countAllMask}")
+            # print(f"countIoU: {self.countIoU}, coutIoUSeen: {self.countIoUSeen}, countIoUUnseen: {self.countIoUUnseen},  countAllMask: {self.countAllMask}")
             # self._predictions.extend(self.encode_json_sem_seg(, input["file_name"]))
             
             '''
@@ -174,6 +196,10 @@ class GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen(SemSegEvaluator):
             countIoUSeen_list = all_gather(self.countIoUSeen)
             countIoUUnseen_list = all_gather(self.countIoUUnseen)
             countAllMask_list = all_gather(self.countAllMask)
+            countIoUSeenAllMask_list = all_gather(self.countIoUSeenAllMask)
+            countIoUUnseenAllMask_list = all_gather(self.countIoUUnseenAllMask)
+            countSeenAllMask_list = all_gather(self.countSeenAllMask)
+            countUnseenAllMask_list = all_gather(self.countUnseenAllMask)
             if not is_main_process():
                 return
 
@@ -184,11 +210,20 @@ class GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen(SemSegEvaluator):
             self.countAllMask = 0
             self.countIoUSeen = 0
             self.countIoUUnseen = 0
-            for countIoU, countAllMask, countIoUSeen, countIoUUnseen in zip(countIoU_list, countAllMask_list, countIoUSeen_list, countIoUUnseen_list):
+            self.countIoUSeenAllMask = 0
+            self.countIoUUnseenAllMask = 0
+            self.countSeenAllMask = 0
+            self.countUnseenAllMask = 0
+            for countIoU, countAllMask, countIoUSeen, countIoUUnseen,countIoUSeenAllMask,countIoUUnseenAllMask,countSeenAllMask,countUnseenAllMask in \
+                zip(countIoU_list, countAllMask_list, countIoUSeen_list, countIoUUnseen_list,countIoUSeenAllMask_list,countIoUUnseenAllMask_list,countSeenAllMask_list,countUnseenAllMask_list):
                 self.countIoU += countIoU
                 self.countAllMask += countAllMask
                 self.countIoUSeen += countIoUSeen
                 self.countIoUUnseen += countIoUUnseen
+                self.countIoUSeenAllMask += countIoUSeenAllMask
+                self.countIoUUnseenAllMask += countIoUUnseenAllMask
+                self.countSeenAllMask += countSeenAllMask
+                self.countUnseenAllMask += countUnseenAllMask
 
         if self._output_dir:
             PathManager.mkdirs(self._output_dir)
@@ -201,7 +236,19 @@ class GeneralizedSemSegEvaluatorClassAgnosticSeenUnseen(SemSegEvaluator):
             res["countIoUSeen"] = self.countIoUSeen
             res["countIoUUnseen"] = self.countIoUUnseen
             res["countAllMask"] = self.countAllMask
+            res["countSeenAllMask"] = self.countSeenAllMask
+            res["countIoUSeenAllMask"] = self.countIoUSeenAllMask 
+            res["countIoUUnseenAllMask"]= self.countIoUUnseenAllMask
+            res["countUnseenAllMask"] = self.countUnseenAllMask
             res["AP"] = self.countIoU / self.countAllMask
+            res["R_Seen"] = self.countIoUSeen / self.countSeenAllMask
+            res["R_Unseen"] = self.countIoUUnseen / self.countUnseenAllMask
+            res["Recall"]  = self.countIoU / self.countAllMask
+            # res["countIoU"] = self.countIoU
+            # res["countIoUSeen"] = self.countIoUSeen
+            # res["countIoUUnseen"] = self.countIoUUnseen
+            # res["countAllMask"] = self.countAllMask
+            # res["AP"] = self.countIoU / self.countAllMask
             # res[""]
         else:
             res["countIoU"] = self.countIoU

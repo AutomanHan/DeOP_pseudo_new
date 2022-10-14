@@ -205,6 +205,8 @@ class ZeroShotMaskFormer(MaskFormer):
         outputs["pred_logits"] = self.clip_adapter.get_sim_logits(
             text_features, self.clip_adapter.normalize_feature(outputs["pred_logits"])
         )
+        
+        
         if self.training:
             
 

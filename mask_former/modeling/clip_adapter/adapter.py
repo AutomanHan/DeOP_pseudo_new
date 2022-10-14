@@ -276,3 +276,104 @@ class PerPixelClipAdapter(ClipAdapter):
         text_feature = self.get_text_features(text)  # k,feat_dim
         image_features = self.get_image_features(image)
         return self.get_sim_logits(text_feature, image_features)
+
+
+
+class ClipFeatureAdapter(nn.Module):
+    def __init__(self, clip_model_name: str, prompt_learner: PromptExtractor):
+        super().__init__()
+        self.clip_model = build_clip_model(clip_model_name)
+        self.prompt_learner = prompt_learner
+        self.prompt_learner.init_buffer(self.clip_model)
+        self.text_feature_buffer = {}
+
+    def forward(self, image: torch.Tensor, text: List[str],mask: torch.Tensor, **kwargs):
+        image = self._preprocess_image(image, **kwargs)
+        # import pdb; pdb.set_trace()
+        text_feature = self.get_text_features(text)  # k,feat_dim
+        image_features = self.get_image_features(image, mask, return_cls=False)
+        return self.get_sim_logits(text_feature, image_features)
+
+    def _preprocess_image(self, image: torch.Tensor):
+        return image
+
+    def _get_text_features(self, noun_list: List[str]):
+        if not self.prompt_learner.with_trainable_params:
+
+            left_noun_list = [
+                noun for noun in noun_list if noun not in self.text_feature_buffer
+            ]
+            if len(left_noun_list) > 0:
+                left_text_features = self.prompt_learner(
+                    left_noun_list, self.clip_model
+                )
+                self.text_feature_buffer.update(
+                    {
+                        noun: text_feature
+                        for noun, text_feature in zip(
+                            left_noun_list, left_text_features
+                        )
+                    }
+                )
+            return torch.stack([self.text_feature_buffer[noun] for noun in noun_list])
+        else:
+            text_features = self.prompt_learner(noun_list, self.clip_model)
+            self.text_feature_buffer.update(
+                {
+                    noun: text_feature.detach()
+                    for noun, text_feature in zip(noun_list, text_features)
+                }
+            )
+            return text_features
+
+    def get_text_features(self, noun_list: List[str]):
+        return self._get_text_features(noun_list)
+
+    def get_image_features(self, image: torch.Tensor, mask: torch.tensor, return_cls: bool):
+        image_features = self.clip_model.visual(image, return_cls=return_cls)
+        h, w = image_features.shape[1], image_features.shape[2]
+        image_features = image_features/(h*w)
+        # F.interpolate(mask_pred.unsqueeze(0),size=(clip_feature.shape[1], clip_feature.shape[2]),mode="nearest")
+        # import pdb; pdb.set_trace()
+        mask = mask.to(image_features.dtype)
+        mask_downsample = F.interpolate(mask.unsqueeze(1), size=(image_features.shape[1], image_features.shape[2]), mode = "nearest")
+        mask_new = []
+        
+        if((mask_downsample.sum(dim=(2,3))==0).sum() > 0):
+            for m, m_src in zip(mask_downsample, mask):
+                # import pdb; pdb.set_trace()
+                if(m.sum(dim =(1,2)) == 0):
+                    # import pdb; pdb.set_trace()
+                    idxMax = m_src.argmax()
+                    idx_x = idxMax // m_src.shape[0]
+                    idx_y = idxMax % m_src.shape[0]
+                    x_ratio = m_src.shape[0]// m.shape[1]
+                    y_ratio = m_src.shape[1] // m.shape[2]
+                    m[:, idx_x//x_ratio, idx_y // y_ratio] = 1
+                    
+                #     pass
+                # if(m.sum(dim =(1,2)) == 0):
+                #     m[:, :3,:3] = 1.0
+                    # import pdb; pdb.set_trace()
+                mask_new.append(m)
+            mask_downsample = torch.stack(mask_new)
+        
+
+        image_features=torch.einsum("nhwd, nchw->ncd", image_features, mask_downsample)
+        image_features = image_features.squeeze(1)
+        # mask_count = mask.sum(dim=(1,2)).unsqueeze(1)
+        # image_features = image_features/mask_count
+        # image_features = torch.einsum("n, -> n")
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        return image_features
+
+    def get_sim_logits(
+        self,
+        text_features: torch.Tensor,
+        image_features: torch.Tensor,
+        temperature: float = 100,
+    ):
+        return temperature * image_features @ text_features.T
+
+    def normalize_feature(self, feat: torch.Tensor):
+        return feat / feat.norm(dim=-1, keepdim=True)
