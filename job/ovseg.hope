@@ -36,7 +36,9 @@ worker.gcores32g = 4
 #worker.gcores32g = 8
 #worker.gcores32g = 1
 ## worker启动后执行的脚本，一般为训练作业的执行命令
-worker.script = sh train_learn_prompts_featureclip.sh
+worker.script = sh train_learn_prompts_featureclip_lr10.sh
+#worker.script = sh train_learn_prompts_featureclip_lr05.sh
+#worker.script = sh train_learn_prompts_featureclip_lr005.sh
 #worker.script = sh train_learned_prompts_maskformer_voc.sh
 #worker.script = sh train_learn_prompts_voc.sh
 #worker.script = sh train_learned_prompts_maskformer_clipbackbone.sh
