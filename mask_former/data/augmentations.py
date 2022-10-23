@@ -1,5 +1,6 @@
 import math
 import numbers
+from pickle import NEWOBJ_EX
 import numpy as np
 from detectron2.data.transforms.augmentation import Augmentation
 from detectron2.data.transforms.transform import (
@@ -196,4 +197,58 @@ class CenterCrop(Augmentation):
                 crop_left, crop_top, crop_width, crop_height, image_width, image_height
             )
         )
+        return TransformList(transforms)
+
+# resize并保持比例
+class ResizeMy(Augmentation):
+    def __init__(self, size, seg_ignore_label):
+        if isinstance(size, numbers.Number):
+            size = (int(size), int(size))
+        elif isinstance(size, (tuple, list)) and len(size) == 1:
+            size = (size[0], size[0])
+        self.size = size
+        self.seg_ignore_label = seg_ignore_label
+        self.interpolation = Image.BILINEAR
+
+    def get_transform(self, image):
+
+        image_height, image_width = image.shape[:2]
+        crop_height, crop_width = self.size
+        # print(self.size)
+
+        ratio_w = crop_width / image_width
+        ratio_h = crop_height /image_height
+
+        if ratio_w >ratio_h :  # h边较长
+            new_h = crop_height
+            new_w = int(image_width * ratio_h)
+        else:
+            new_h =  int(image_height * ratio_w)
+            new_w = crop_width
+        if(image_height == 0 or image_width == 0 ):
+            print(image_height, image_width, new_h, new_w, ratio_h, ratio_w)
+
+        transforms=[]
+        transforms.append(
+            ResizeTransform(
+                    image_height, image_width, new_h, new_w, interp=self.interpolation
+                )
+        )
+        padding_ltrb = [
+                (crop_width - new_w) // 2 if crop_width > new_w else 0,
+                (crop_height - new_h) // 2 if crop_height > new_h else 0,
+                (crop_width - new_w + 1) // 2 if crop_width > new_w else 0,
+                (crop_height - new_h + 1) // 2
+                if crop_height > new_h
+                else 0,
+            ]
+        transforms.append(
+                PadTransform(
+                    *padding_ltrb,
+                    orig_w=new_w,
+                    orig_h=new_h,
+                    seg_pad_value=self.seg_ignore_label
+                )
+            )
+                
         return TransformList(transforms)

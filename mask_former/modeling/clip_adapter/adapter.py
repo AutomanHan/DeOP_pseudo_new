@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from detectron2.structures import BitMasks
 from .utils import build_clip_model, crop_with_mask, CLIP
 from .text_prompt import PromptExtractor
-
+import numpy as np
 
 class ClipAdapter(nn.Module):
     def __init__(self, clip_model_name: str, prompt_learner: PromptExtractor):
@@ -335,8 +335,16 @@ class ClipFeatureAdapter(nn.Module):
         image_features = image_features/(h*w)
         # F.interpolate(mask_pred.unsqueeze(0),size=(clip_feature.shape[1], clip_feature.shape[2]),mode="nearest")
         # import pdb; pdb.set_trace()
-        mask = mask.to(image_features.dtype)
-        mask_downsample = F.interpolate(mask.unsqueeze(1), size=(image_features.shape[1], image_features.shape[2]), mode = "nearest")
+        upsample = True
+        if upsample:
+            image_features_upsample = F.interpolate(image_features.permute(0,3,1,2), size = (mask.shape[1], mask.shape[2]), mode="bilinear")
+            image_features = image_features_upsample.permute(0,2,3,1)
+            mask_downsample = mask.unsqueeze(1)
+            mask_downsample = mask_downsample.to(image_features.dtype)
+            
+        else:
+            mask = mask.to(image_features.dtype)
+            mask_downsample = F.interpolate(mask.unsqueeze(1), size=(image_features.shape[1], image_features.shape[2]), mode = "nearest")
         mask_new = []
         
         if((mask_downsample.sum(dim=(2,3))==0).sum() > 0):
@@ -345,10 +353,15 @@ class ClipFeatureAdapter(nn.Module):
                 if(m.sum(dim =(1,2)) == 0):
                     # import pdb; pdb.set_trace()
                     idxMax = m_src.argmax()
-                    idx_x = idxMax // m_src.shape[0]
-                    idx_y = idxMax % m_src.shape[0]
-                    x_ratio = m_src.shape[0]// m.shape[1]
-                    y_ratio = m_src.shape[1] // m.shape[2]
+                    idx_x = idxMax // m_src.shape[1]
+                    idx_y = idxMax % m_src.shape[1]
+                    x_ratio = m_src.shape[0]// m.shape[1] +1
+                    y_ratio = m_src.shape[1] // m.shape[2] +1
+                    # if(idx_x//x_ratio >= m.shape[1] or idx_y // y_ratio>=m.shape[2]):
+                    #     import pdb; pdb.set_trace()
+                    # print(m.shape, idx_x, idx_y ,x_ratio, y_ratio)
+                    # m[:, idx_x//x_ratio, idx_y // y_ratio] = 1
+                    idx_x, idx_y =mask2pt(m_src)
                     m[:, idx_x//x_ratio, idx_y // y_ratio] = 1
                     
                 #     pass
@@ -358,7 +371,7 @@ class ClipFeatureAdapter(nn.Module):
                 mask_new.append(m)
             mask_downsample = torch.stack(mask_new)
         
-
+        # import pdb; pdb.set_trace()
         image_features=torch.einsum("nhwd, nchw->ncd", image_features, mask_downsample)
         image_features = image_features.squeeze(1)
         # mask_count = mask.sum(dim=(1,2)).unsqueeze(1)
@@ -377,3 +390,23 @@ class ClipFeatureAdapter(nn.Module):
 
     def normalize_feature(self, feat: torch.Tensor):
         return feat / feat.norm(dim=-1, keepdim=True)
+    
+def mask2box(mask: np.ndarray):
+    # use naive way
+    row = np.nonzero(mask.sum(axis=0))[0]
+    if len(row) == 0:
+        return None
+    x1 = row.min()
+    x2 = row.max()
+    col = np.nonzero(mask.sum(axis=1))[0]
+    y1 = col.min()
+    y2 = col.max()
+    return x1, y1, x2 + 1 - x1, y2 + 1 - y1
+def mask2pt(mask: torch.Tensor):
+    col = mask.sum(dim = 0).nonzero()
+    y1= col.min()
+    y2 = col.max()
+    row = mask.sum(dim = 1).nonzero()
+    x1 = row.min()
+    x2 = row.max()
+    return (x1+x2)//2, (y1+y2)//2

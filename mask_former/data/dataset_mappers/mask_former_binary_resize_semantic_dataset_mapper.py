@@ -13,12 +13,12 @@ from detectron2.data import transforms as T
 from detectron2.projects.point_rend import ColorAugSSDTransform
 from detectron2.structures import BitMasks, Instances
 
-from ..augmentations import CropImageWithMask, RandomResizedCrop, CenterCrop
+from ..augmentations import CropImageWithMask, RandomResizedCrop, CenterCrop, ResizeMy
 
 __all__ = ["MaskFormerSemanticDatasetMapper"]
 
 
-class MaskFormerBinarySemanticDatasetMapper:
+class MaskFormerBinaryResizeSemanticDatasetMapper:
     """
     A callable which takes a dataset dict in Detectron2 Dataset format,
     and map it into a format used by MaskFormer for semantic segmentation.
@@ -68,19 +68,21 @@ class MaskFormerBinarySemanticDatasetMapper:
         # before augmentation, we have to crop the image around the selected mask with a expand ratio
         augs = [CropImageWithMask(cfg.MODEL.CLIP_ADAPTER.MASK_EXPAND_RATIO)]
         if is_train:
+            augs = []
             augs.append(RandomResizedCrop(cfg.INPUT.MIN_SIZE_TRAIN))
             augs.append(T.RandomFlip())
 
             # Assume always applies to the training set.
             dataset_names = cfg.DATASETS.TRAIN
         else:
+            augs = []
             min_size = cfg.INPUT.MIN_SIZE_TEST
             max_size = cfg.INPUT.MAX_SIZE_TEST
             sample_style = "choice"
             dataset_names = cfg.DATASETS.TEST
             meta = MetadataCatalog.get(dataset_names[0])
             ignore_label = meta.ignore_label
-            augs.append(CenterCrop(min_size, seg_ignore_label=ignore_label))
+            augs.append(ResizeMy(min_size, seg_ignore_label=ignore_label))
             # augs = [T.ResizeShortestEdge(min_size, max_size, sample_style)]
 
         meta = MetadataCatalog.get(dataset_names[0])

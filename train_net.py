@@ -12,6 +12,8 @@ import os
 from collections import OrderedDict
 from typing import Any, Dict, List, Set
 
+# from code.pretrain.ov-seg.zsseg.baseline.mask_former.data.dataset_mappers.mask_former_binary_noaug_semantic_dataset_mapper import MaskFormerBinaryNoaugSemanticDatasetMapper
+
 import detectron2.utils.comm as comm
 import torch
 from detectron2.checkpoint import DetectionCheckpointer
@@ -40,6 +42,8 @@ from mask_former.data import (
     MaskFormerSemanticDatasetMapper,
     OracleDatasetMapper,
     MaskFormerBinarySemanticDatasetMapper,
+    MaskFormerBinaryNoaugSemanticDatasetMapper,
+    MaskFormerBinaryResizeSemanticDatasetMapper,
     ProposalClasificationDatasetMapper,
 )
 
@@ -134,6 +138,12 @@ class Trainer(DefaultTrainer):
         elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_binary_semantic":
             mapper = MaskFormerBinarySemanticDatasetMapper(cfg, True)
             dataset = dataset_sample_per_class(cfg)
+        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_binary_noaug_semantic":
+            mapper = MaskFormerBinaryNoaugSemanticDatasetMapper(cfg, True)
+            dataset = dataset_sample_per_class(cfg)
+        elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_binary_resize_semantic":
+            mapper = MaskFormerBinaryResizeSemanticDatasetMapper(cfg, True)
+            dataset = dataset_sample_per_class(cfg)
         return build_detection_train_loader(cfg, mapper=mapper, dataset=dataset)
 
     @classmethod
@@ -150,6 +160,11 @@ class Trainer(DefaultTrainer):
                 mapper = MaskFormerSemanticDatasetMapper(cfg, False)
             elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_binary_semantic":
                 mapper = MaskFormerBinarySemanticDatasetMapper(cfg, False)
+            elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_binary_noaug_semantic":
+                mapper = MaskFormerBinaryNoaugSemanticDatasetMapper(cfg, False)
+                # dataset = dataset_sample_per_class(cfg)
+            elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_binary_resize_semantic":
+                mapper = MaskFormerBinaryResizeSemanticDatasetMapper(cfg, False)
             elif cfg.INPUT.DATASET_MAPPER_NAME == "propsoal_classification":
                 mapper = ProposalClasificationDatasetMapper(cfg, False)
             else:

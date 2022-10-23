@@ -18,7 +18,7 @@ from ..augmentations import CropImageWithMask, RandomResizedCrop, CenterCrop
 __all__ = ["MaskFormerSemanticDatasetMapper"]
 
 
-class MaskFormerBinarySemanticDatasetMapper:
+class MaskFormerBinaryNoaugSemanticDatasetMapper:
     """
     A callable which takes a dataset dict in Detectron2 Dataset format,
     and map it into a format used by MaskFormer for semantic segmentation.
@@ -74,6 +74,7 @@ class MaskFormerBinarySemanticDatasetMapper:
             # Assume always applies to the training set.
             dataset_names = cfg.DATASETS.TRAIN
         else:
+            augs = []
             min_size = cfg.INPUT.MIN_SIZE_TEST
             max_size = cfg.INPUT.MAX_SIZE_TEST
             sample_style = "choice"
@@ -109,6 +110,7 @@ class MaskFormerBinarySemanticDatasetMapper:
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
         utils.check_image_size(dataset_dict, image)
 
+
         if "sem_seg_file_name" in dataset_dict:
             # PyTorch transformation not implemented for uint16, so converting it to double first
             sem_seg_gt = utils.read_image(dataset_dict.pop("sem_seg_file_name")).astype(
@@ -124,12 +126,12 @@ class MaskFormerBinarySemanticDatasetMapper:
                 )
             )
 
-        aug_input = T.AugInput(image, sem_seg=sem_seg_gt)
-        # import pdb; pdb.set_trace()
-        aug_input.category_id = dataset_dict["category_id"]
-        aug_input, transforms = T.apply_transform_gens(self.tfm_gens, aug_input)
-        image = aug_input.image
-        sem_seg_gt = aug_input.sem_seg
+        # aug_input = T.AugInput(image, sem_seg=sem_seg_gt)
+        # # import pdb; pdb.set_trace()
+        # aug_input.category_id = dataset_dict["category_id"]
+        # aug_input, transforms = T.apply_transform_gens(self.tfm_gens, aug_input)
+        # image = aug_input.image
+        # sem_seg_gt = aug_input.sem_seg
 
         # Pad image and segmentation label here!
         image = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))

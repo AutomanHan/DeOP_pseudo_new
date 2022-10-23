@@ -9,6 +9,7 @@ from detectron2.modeling import META_ARCH_REGISTRY
 from detectron2.utils.logger import log_every_n, log_first_n
 from detectron2.utils.events import get_event_storage
 from detectron2.utils.visualizer import Visualizer
+from detectron2.structures import ImageList
 from torch import nn
 from torch.nn import functional as F
 
@@ -89,6 +90,9 @@ class ProposalClipClassifierFeature(nn.Module):
         assert len(set(dataset_name)) == 1
         dataset_name = dataset_name[0]
         images = [x["image"].to(self.device) for x in batched_inputs]
+        # import pdb; pdb.set_trace()
+        # self.size_divisibility = 32
+        # images = ImageList.from_tensors(images, self.size_divisibility)
         
         images = torch.stack(images)
         
@@ -101,11 +105,13 @@ class ProposalClipClassifierFeature(nn.Module):
         class_names = [
             c.strip() for c in MetadataCatalog.get(dataset_name).stuff_classes
         ]
+        # import pdb; pdb.set_trace()
         # normalize
         images = (images / 255.0 - self.pixel_mean) / self.pixel_std
         # images = (
         #     images * masks[:, None, ...] + (1 - masks[:, None, ...]) * self.pixel_mean
         # )
+    
         logits = self.clip_adapter(images, class_names, masks)
         metadata = MetadataCatalog.get(dataset_name)
 
