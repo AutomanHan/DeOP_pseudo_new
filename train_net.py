@@ -81,6 +81,7 @@ class Trainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+        # import pdb; pdb.set_trace()
         if evaluator_type in ["sem_seg", "ade20k_panoptic_seg"]:
             if cfg.PSEUDO:
                 evaluator = partial(

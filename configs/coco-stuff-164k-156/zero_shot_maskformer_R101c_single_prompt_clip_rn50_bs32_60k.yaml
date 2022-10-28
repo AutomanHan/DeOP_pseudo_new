@@ -2,7 +2,8 @@ _BASE_: zero_shot_maskformer_R50_single_prompt_bs32_60k.yaml
 MODEL:
   BACKBONE:
     NAME: "build_resnet_deeplab_backbone"
-  WEIGHTS: "detectron2://DeepLab/R-103.pkl"
+  # WEIGHTS: "detectron2://DeepLab/R-103.pkl"
+  WEIGHTS: "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/hancong/code/pretrain/ov-seg/zsseg.baseline/weights/maskfomer/R-103.pkl"
   RESNETS:
     DEPTH: 101
     STEM_TYPE: "deeplab"
@@ -16,3 +17,8 @@ MODEL:
     PROMPT_DIM: 1024
   SEM_SEG_HEAD:
     EMBEDDING_DIM: 1024
+
+  DATASETS:
+    #TRAIN: ("coco_2017_train_stuff_base_sem_seg",)
+    # TEST: ("coco_2017_test_stuff_base_sem_seg", "coco_2017_test_stuff_novel_sem_seg", "coco_2017_test_stuff_sem_seg")
+    TEST: ("coco_2017_test_stuff_sem_seg",)

@@ -247,7 +247,9 @@ class ResizeMy(Augmentation):
                     *padding_ltrb,
                     orig_w=new_w,
                     orig_h=new_h,
+                    # pad_value = 128,
                     seg_pad_value=self.seg_ignore_label
+                    # seg_pad_value=0,
                 )
             )
                 

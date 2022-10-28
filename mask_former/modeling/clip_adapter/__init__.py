@@ -7,7 +7,7 @@ from .text_prompt import (
     VILDPromptExtractor,
     LearnablePromptExtractor,
 )
-from .adapter import ClipAdapter, ClipFeatureAdapter, MaskFormerClipAdapter, PerPixelClipAdapter
+from .adapter import ClipAdapter, ClipFeatureAdapter, MaskFormerClipAdapter, PerPixelClipAdapter, MaskFormerClipFeatureAdapter
 # from .utils import *
 
 

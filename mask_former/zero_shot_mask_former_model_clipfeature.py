@@ -6,6 +6,7 @@ from typing import Tuple
 import torch
 from torch import nn
 from torch.nn import functional as F
+import numpy as np
 
 from detectron2.config import configurable
 from detectron2.data import MetadataCatalog
@@ -17,13 +18,15 @@ from detectron2.utils.logger import log_first_n
 from .modeling.clip_adapter import (
     ClipAdapter,
     MaskFormerClipAdapter,
+    ClipFeatureAdapter,
+    MaskFormerClipFeatureAdapter,
     build_prompt_learner,
 )
 from .mask_former_model import MaskFormer
 
 
 @META_ARCH_REGISTRY.register()
-class ZeroShotMaskFormer(MaskFormer):
+class ZeroShotMaskFormerClipFeature(MaskFormer):
     """
     Main class for zero shot mask classification semantic segmentation architectures.
     """
@@ -113,24 +116,14 @@ class ZeroShotMaskFormer(MaskFormer):
             cls_prompt_learner = build_prompt_learner(
                 cfg.MODEL.CLIP_ADAPTER.REGION_CLIP_ADAPTER
             )
-            region_clip_adapter = MaskFormerClipAdapter(
+            region_clip_adapter = MaskFormerClipFeatureAdapter(
                 cfg.MODEL.CLIP_ADAPTER.REGION_CLIP_ADAPTER.CLIP_MODEL_NAME,
                 cls_prompt_learner,
-                mask_fill=cfg.MODEL.CLIP_ADAPTER.MASK_FILL,
-                mask_expand_ratio=cfg.MODEL.CLIP_ADAPTER.MASK_EXPAND_RATIO,
-                mask_thr=cfg.MODEL.CLIP_ADAPTER.MASK_THR,
-                mask_matting=cfg.MODEL.CLIP_ADAPTER.MASK_MATTING,
-                region_resized=cfg.MODEL.CLIP_ADAPTER.REGION_RESIZED,
             )
 
-        clip_adapter = MaskFormerClipAdapter(
+        clip_adapter = MaskFormerClipFeatureAdapter(
             cfg.MODEL.CLIP_ADAPTER.CLIP_MODEL_NAME,
             prompt_learner,
-            mask_fill=cfg.MODEL.CLIP_ADAPTER.MASK_FILL,
-            mask_expand_ratio=cfg.MODEL.CLIP_ADAPTER.MASK_EXPAND_RATIO,
-            mask_thr=cfg.MODEL.CLIP_ADAPTER.MASK_THR,
-            mask_matting=cfg.MODEL.CLIP_ADAPTER.MASK_MATTING,
-            region_resized=cfg.MODEL.CLIP_ADAPTER.REGION_RESIZED,
         )
         init_kwargs["clip_adapter"] = clip_adapter
         init_kwargs["region_clip_adapter"] = region_clip_adapter
@@ -174,11 +167,13 @@ class ZeroShotMaskFormer(MaskFormer):
         dataset_name = [x["meta"]["dataset_name"] for x in batched_inputs]
         assert len(set(dataset_name)) == 1
         dataset_name = dataset_name[0]
+        
 
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.size_divisibility)
         
+        '''
         # clip image encoder 作为backbone
         # import pdb; pdb.set_trace()
         if self.clipAsBackbone:
@@ -190,11 +185,12 @@ class ZeroShotMaskFormer(MaskFormer):
             features = self.backbone(images.tensor)
             outputs = self.sem_seg_head(features)
         # features = self.backbone(images.tensor)
+        '''
         
         class_names = self.get_class_name_list(dataset_name)
         text_features = self.clip_adapter.get_text_features(class_names)
-        
-        import pdb; pdb.set_trace()
+        '''
+        # import pdb; pdb.set_trace()
         if self.clip_kd_loss:
             semseg_pred_mask = outputs["pred_masks"]
             semseg_pred_logits = outputs["pred_logits"]
@@ -205,86 +201,27 @@ class ZeroShotMaskFormer(MaskFormer):
         outputs["pred_logits"] = self.clip_adapter.get_sim_logits(
             text_features, self.clip_adapter.normalize_feature(outputs["pred_logits"])
         )
+        '''
         
-        
-        if self.training:
-            
-
-            if "aux_outputs" in outputs.keys():
-                for i in range(len(outputs["aux_outputs"])):
-                    outputs["aux_outputs"][i][
-                        "pred_logits"
-                    ] = self.clip_adapter.get_sim_logits(
-                        text_features,
-                        self.clip_adapter.normalize_feature(
-                            outputs["aux_outputs"][i]["pred_logits"]
-                        ),
-                    )
-            # mask classification target
-            if "instances" in batched_inputs[0]:
-                gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-                targets = self.prepare_targets(gt_instances, images)
-            else:
-                targets = None
-
-            # bipartite matching-based loss
-            losses, indicesSrc = self.criterion(outputs, targets)
-            if self.clip_kd_loss:
-                outputs["pred_region_logits"] = semseg_pred_logits
-                # outputs["pred_masks_semseg"]
-                target_regionfeature_results, target_regionfeature_valid= self.kd_region_feature(semseg_pred_mask,batched_inputs, images)
-                outputs["clip_region_logits"] = target_regionfeature_results
-                outputs["clip_region_valid"] = target_regionfeature_valid
-                losses.update(self.kd_loss_cal(output=outputs, indices=indicesSrc))
-            # import pdb; pdb.set_trace()
-            for k in list(losses.keys()):
-                if k in self.criterion.weight_dict:
-                    losses[k] *= self.criterion.weight_dict[k]
-                else:
-                    # remove this loss if not specified in `weight_dict`
-                    losses.pop(k)
-            # print(losses)
-
-            return losses
+        if "sem_seg" in batched_inputs[0]:
+            semseg_gts = [x["sem_seg"].to(self.device) for x in batched_inputs]
         else:
-            mask_cls_results = outputs["pred_logits"]
-            mask_pred_results = outputs["pred_masks"]
-            # upsample masks
-            mask_pred_results = F.interpolate(
-                mask_pred_results,
-                size=(images.tensor.shape[-2], images.tensor.shape[-1]),
-                mode="bilinear",
-                align_corners=False,
-            )
+            semseg_gts = None
 
-            processed_results = []
-            for mask_cls_result, mask_pred_result, input_per_image, image_size in zip(
-                mask_cls_results, mask_pred_results, batched_inputs, images.image_sizes
-            ):
-                height = image_size[0]
-                width = image_size[1]
-                mask_pred_result = sem_seg_postprocess(
-                    mask_pred_result, image_size, height, width
-                )
-                image = input_per_image["image"].to(self.device)
-                # semantic segmentation inference
-                r = self.semantic_inference(
-                    mask_cls_result, mask_pred_result, image, class_names, dataset_name
-                )
-                height = input_per_image.get("height", image_size[0])
-                width = input_per_image.get("width", image_size[1])
-                r = sem_seg_postprocess(r, image_size, height, width)
-                processed_results.append({"sem_seg": r, "pred_masks":mask_pred_result})
-
-                # evluate ap:
-                # processed_results.append({})
-
-                # panoptic segmentation inference
-                if self.panoptic_on:
-                    panoptic_r = self.panoptic_inference(
-                        mask_cls_result, mask_pred_result
-                    )
-                    processed_results[-1]["panoptic_seg"] = panoptic_r
+        processed_results = []
+        for input_per_image, image_size, semseg_gt in zip(
+            batched_inputs, images.image_sizes, semseg_gts
+        ):
+            height = image_size[0]
+            width = image_size[1]
+            
+            image = input_per_image["image"].to(self.device)
+            # semantic segmentation inference
+            r, semseg_masks = self.semantic_inference_gt(image, class_names, dataset_name, semseg_gt, text_features)
+            height = input_per_image.get("height", image_size[0])
+            width = input_per_image.get("width", image_size[1])
+            r = sem_seg_postprocess(r, image_size, height, width)
+            processed_results.append({"sem_seg": r, "pred_masks":semseg_masks})
 
             return processed_results
     
@@ -315,6 +252,53 @@ class ZeroShotMaskFormer(MaskFormer):
             regionfeature_results.append(region_features)
             regionfeature_valid.append(valid_flag)
         return torch.stack(regionfeature_results), torch.stack(regionfeature_valid)
+
+    def semantic_inference_gt(self, image, class_names, dataset_name, semseg_gt, text_features):
+        semseg_masks, classes_gts = self._semseg2semmask(semseg_gt)
+        # import pdb; pdb.set_trace()
+        # self.semseg_masks = semseg_masks
+        # clip_cls_gt, valid_flag_gt = self.region_clip_adapter(
+        #         image, class_names, semseg_masks, normalize=True
+        #     )
+
+        image = (image-self.pixel_mean) / self.pixel_std
+        
+        images = image.unsqueeze(0)
+        classes_clip=self.clip_adapter(images, class_names, semseg_masks)
+        # clip_feature = self.clip_adapter.clip_model.visual(image.unsqueeze(0), return_cls = False)
+        
+        #########################################################
+        '''
+        clip_feature = clip_feature.permute(0,3,1,2)
+        semseg_feature = []
+        clip_feature_tmp = clip_feature.squeeze(0)
+        for semseg_mask in semseg_masks_downsample.squeeze(0):
+            # import pdb; pdb.set_trace()
+            clip_feature_mask = clip_feature_tmp * semseg_mask
+            mask_sum = (clip_feature_tmp > 0.5).sum()
+            clip_feature_sum = clip_feature_mask.sum(dim=[1,2]) / mask_sum
+            semseg_feature.append(clip_feature_sum)
+        clip_maskfeature = torch.stack(semseg_feature)
+        '''
+        #########################################################
+        
+        if(len(classes_clip.shape)==1):
+            classes_clip= classes_clip.unsqueeze(0)
+        # import pdb; pdb.set_trace()
+        classes_clip = F.softmax(classes_clip, dim = -1)
+        semseg_gt_out = torch.einsum("qc,qhw->chw", classes_clip, semseg_masks)
+        
+        
+        # clip_cls_gt = F.softmax(clip_cls_gt[:, :-1], dim=-1)
+
+
+        #########################################################
+        # # gtmask + gt cls
+        # classes_gts_onehot = F.one_hot(classes_gts, num_classes=171)
+        # semseg_gt_out = torch.einsum("qc,qhw->chw", classes_gts_onehot.to(torch.float32), semseg_masks)
+        #########################################################
+        # semseg_gt_out = torch.einsum("qc,qhw->chw", clip_cls_gt, semseg_masks)
+        return semseg_gt_out, semseg_masks
 
     def semantic_inference(self, mask_cls, mask_pred, image, class_names, dataset_name):
         mask_cls = F.softmax(mask_cls, dim=-1)[..., :-1]
@@ -396,3 +380,36 @@ class ZeroShotMaskFormer(MaskFormer):
         )
         src_idx = torch.cat([src for (src, _) in indices])
         return batch_idx, src_idx
+    
+    def _semseg2semmask(self,semseg_gt):
+        sem_seg_gt = semseg_gt.cpu().numpy()
+        
+        classes = np.unique(sem_seg_gt)
+        classes = classes[classes != 255]
+        masks = []
+        classes_gt = []
+        for class_id in classes:
+            mask = np.zeros_like(semseg_gt.cpu())
+            mask[sem_seg_gt == class_id] = 1.0
+            masks.append(mask)
+            classes_gt.append(class_id)
+        if len(masks) == 0:
+            # Some image does not have annotation (all ignored)
+            masks= torch.zeros(
+                (0, sem_seg_gt.shape[-2], sem_seg_gt.shape[-1])
+            )
+        else:
+            masks=torch.stack(
+                [
+                    torch.from_numpy(np.ascontiguousarray(x.copy()))
+                    for x in masks
+                ]
+            )        
+        return masks.to(torch.float32).to(semseg_gt.device), torch.tensor(classes_gt).to(torch.int64).to(semseg_gt.device)
+    def get_sim_logits(
+        self,
+        text_features: torch.Tensor,
+        image_features: torch.Tensor,
+        temperature: float = 100,
+    ):
+        return temperature * image_features @ text_features.T
