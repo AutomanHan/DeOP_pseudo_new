@@ -6,9 +6,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from torch import _VF
-
-from typing import Optional
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -116,31 +113,23 @@ class AttentionPool2d(nn.Module):
             positional_embedding = torch.cat([cls_pos, per_pos_embedding])
 
         x = x + positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
-
-        # x_out, _ = F.multi_head_attention_forward(query=x,key=x,value=x,embed_dim_to_check=x.shape[-1],num_heads=self.num_heads,
-        #     q_proj_weight=self.q_proj.weight, k_proj_weight=self.k_proj.weight, v_proj_weight=self.v_proj.weight,in_proj_weight=None,
-        #     in_proj_bias=torch.cat([self.q_proj.bias, self.k_proj.bias, self.v_proj.bias]), bias_k=None, bias_v=None, add_zero_attn=False,
-        #     dropout_p=0,out_proj_weight=self.c_proj.weight, out_proj_bias=self.c_proj.bias, use_separate_proj_weight=True, training=self.training,
-        #     need_weights=False, key_padding_mask=mask,
-        # )
-        
-        x, _=multi_head_attention_forward_my(
+        x, _ = F.multi_head_attention_forward(
             query=x,
             key=x,
             value=x,
-            embed_dim_to_check=x.shape[-1],   #
-            num_heads=self.num_heads,           #
+            embed_dim_to_check=x.shape[-1],
+            num_heads=self.num_heads,
             q_proj_weight=self.q_proj.weight,
             k_proj_weight=self.k_proj.weight,
             v_proj_weight=self.v_proj.weight,
-            in_proj_weight=None, #
+            in_proj_weight=None,
             in_proj_bias=torch.cat(
                 [self.q_proj.bias, self.k_proj.bias, self.v_proj.bias]
-            ),   #
-            bias_k=None,         #
-            bias_v=None,         #
-            add_zero_attn=False,    # 
-            dropout_p=0,       # 
+            ),
+            bias_k=None,
+            bias_v=None,
+            add_zero_attn=False,
+            dropout_p=0,
             out_proj_weight=self.c_proj.weight,
             out_proj_bias=self.c_proj.bias,
             use_separate_proj_weight=True,
@@ -148,7 +137,7 @@ class AttentionPool2d(nn.Module):
             need_weights=False,
             key_padding_mask=mask,
         )
-        
+
         if return_cls:
             return x[0]
         else:
@@ -697,182 +686,3 @@ def build_model(state_dict: dict):
     convert_weights(model)
     model.load_state_dict(state_dict)
     return model.eval()
-Tensor = torch.Tensor
-
-# query: Tensor,
-# key: Tensor,
-# value: Tensor,
-# training: bool = True,
-# key_padding_mask: Optional[Tensor] = None,
-# need_weights: bool = True,
-# attn_mask: Optional[Tensor] = None,
-# use_separate_proj_weight: bool = False,
-# q_proj_weight: Optional[Tensor] = None,
-# k_proj_weight: Optional[Tensor] = None,
-# v_proj_weight: Optional[Tensor] = None,
-# static_k: Optional[Tensor] = None,
-# static_v: Optional[Tensor] = None,
-# proposal_mask: Optional[Tensor] = None,
-
-# x, _ = F.multi_head_attention_forward(query=x,key=x,value=x,embed_dim_to_check=x.shape[-1],num_heads=self.num_heads,
-#     q_proj_weight=self.q_proj.weight, k_proj_weight=self.k_proj.weight, v_proj_weight=self.v_proj.weight,
-#     in_proj_weight=None, in_proj_bias=torch.cat([self.q_proj.bias, self.k_proj.bias, self.v_proj.bias]),
-#     bias_k=None, bias_v=None, add_zero_attn=False,  dropout_p=0, out_proj_weight=self.c_proj.weight,
-#     out_proj_bias=self.c_proj.bias, use_separate_proj_weight=True, training=self.training, need_weights=False,key_padding_mask=mask,)
-def multi_head_attention_forward_my(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    embed_dim_to_check: int,   #
-    num_heads: int,           #
-    q_proj_weight: Tensor,
-    k_proj_weight: Tensor,
-    v_proj_weight: Tensor,
-    in_proj_weight: Tensor, #
-    in_proj_bias: Tensor,   #
-    bias_k: Tensor,         #
-    bias_v: Tensor,         #
-    add_zero_attn: bool,    # 
-    dropout_p: float,       # 
-    out_proj_weight: Tensor,
-    out_proj_bias: Tensor,
-    use_separate_proj_weight: bool,
-    training: bool,
-    need_weights:bool,
-    key_padding_mask: Tensor,
-):
-    tgt_len, bsz, embed_dim = query.size()
-    src_len, _, _ = key.shape
-    assert embed_dim == embed_dim_to_check
-    assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
-
-    head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
-    scaling = float(head_dim) ** -0.5
-    
-    if isinstance(embed_dim, torch.Tensor):
-        # embed_dim can be a tensor when JIT tracing
-        head_dim = embed_dim.div(num_heads, rounding_mode='trunc')
-    else:
-        head_dim = embed_dim // num_heads
-
-    q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
-    len1, len2 = q_proj_weight_non_opt.size()
-    
-    assert len1 == embed_dim and len2 == query.size(-1)
-
-    k_proj_weight_non_opt = torch.jit._unwrap_optional(k_proj_weight)
-    len1, len2 = k_proj_weight_non_opt.size()
-    assert len1 == embed_dim and len2 == key.size(-1)
-
-    v_proj_weight_non_opt = torch.jit._unwrap_optional(v_proj_weight)
-    len1, len2 = v_proj_weight_non_opt.size()
-    assert len1 == embed_dim and len2 == value.size(-1)
-
-    if in_proj_bias is not None:
-        q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
-        k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim : (embed_dim * 2)])
-        v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2) :])
-
-    q = q * scaling
-
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
-    if k is not None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-    if v is not None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-
-    src_len = k.size(1)
-
-    if key_padding_mask is not None:
-        assert key_padding_mask.size(0) == bsz
-        assert key_padding_mask.size(1) == src_len
-    
-    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
-
-    if key_padding_mask is not None:
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2),
-            float("-inf"),
-        )
-        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
-    
-    attn_output_weights = softmax(attn_output_weights, dim=-1)
-    attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
-
-    attn_output = torch.bmm(attn_output_weights, v)
-    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-
-    if need_weights:
-        # average attention weights over heads
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        return attn_output, attn_output_weights.sum(dim=1) / num_heads
-    else:
-        return attn_output, None
-
-
-def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
-    r"""
-    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
-    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
-    Shape:
-        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
-          additional dimensions
-        - Weight: :math:`(out\_features, in\_features)`
-        - Bias: :math:`(out\_features)`
-        - Output: :math:`(N, *, out\_features)`
-    """
-    # if has_torch_function_variadic(input, weight):
-    #     return handle_torch_function(linear, (input, weight), input, weight, bias=bias)
-    return torch._C._nn.linear(input, weight, bias)
-
-
-def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[int] = None) -> Tensor:
-    r"""Applies a softmax function.
-    Softmax is defined as:
-    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
-    It is applied to all slices along dim, and will re-scale them so that the elements
-    lie in the range `[0, 1]` and sum to 1.
-    See :class:`~torch.nn.Softmax` for more details.
-    Args:
-        input (Tensor): input
-        dim (int): A dimension along which softmax will be computed.
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
-          is performed. This is useful for preventing data type overflows. Default: None.
-    .. note::
-        This function doesn't work directly with NLLLoss,
-        which expects the Log to be computed between the Softmax and itself.
-        Use log_softmax instead (it's faster and has better numerical properties).
-    """
-    # if has_torch_function_unary(input):
-    #     return handle_torch_function(softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
-    if dim is None:
-        dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = input.softmax(dim)
-    else:
-        ret = input.softmax(dim, dtype=dtype)
-    return ret
-
-# Activation functions
-def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
-    During training, randomly zeroes some of the elements of the input
-    tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution.
-    See :class:`~torch.nn.Dropout` for details.
-    Args:
-        p: probability of an element to be zeroed. Default: 0.5
-        training: apply dropout if is ``True``. Default: ``True``
-        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
-    """
-    # if has_torch_function_unary(input):
-    #     return handle_torch_function(dropout, (input,), input, p=p, training=training, inplace=inplace)
-    if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
-    return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
