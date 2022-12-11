@@ -291,6 +291,87 @@ class Transformer(nn.Module):
             x = block(x, **kwargs)
         return x
 
+class ResidualAttentionBlockVit(nn.Module):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, outlayer = False):
+        super().__init__()
+
+        # self.attn = nn.MultiheadAttention(d_model, n_head)
+        if outlayer:
+            self.attn = MultiheadAttentionVit(d_model, n_head)
+        else:
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.ln_1 = LayerNorm(d_model)
+        self.mlp = nn.Sequential(
+            OrderedDict(
+                [
+                    ("c_fc", nn.Linear(d_model, d_model * 4)),
+                    ("gelu", QuickGELU()),
+                    ("c_proj", nn.Linear(d_model * 4, d_model)),
+                ]
+            )
+        )
+        self.ln_2 = LayerNorm(d_model)
+        self.attn_mask = attn_mask
+
+    def attention(self, x: torch.Tensor, **kwargs):
+        self.attn_mask = (
+            self.attn_mask.to(dtype=x.dtype, device=x.device)
+            if self.attn_mask is not None
+            else None
+        )
+        return self.attn(
+            x, x, x, need_weights=False, attn_mask=self.attn_mask, **kwargs
+        )[0]
+
+    def forward(self, x: torch.Tensor, **kwargs):
+        return_attention = False
+        if "return_attention" in kwargs and kwargs["return_attention"]:
+            return_attention = True
+        if "return_attention" in kwargs:
+            kwargs.pop("return_attention")
+        if return_attention:
+            return self.attention(self.ln_1(x), **kwargs)
+        x = x + self.attention(self.ln_1(x), **kwargs)
+        
+        x = x + self.mlp(self.ln_2(x))
+        return x
+class TransformerVit(nn.Module):
+    def __init__(
+        self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, layermaskvit = 11
+    ):
+        super().__init__()
+        self.width = width
+        self.layers = layers
+        # import pdb; pdb.set_trace()
+        self.layermaskvit = layermaskvit
+        num = layers-self.layermaskvit
+        tmp = [ResidualAttentionBlockVit(width, heads, attn_mask) for _ in range(layers-num)]
+        if num >0:
+            tmp += [ResidualAttentionBlockVit(width, heads, attn_mask, outlayer = True)]
+            if num > 1:
+                tmp += [ResidualAttentionBlockVit(width, heads, attn_mask, outlayer = True) for _ in range(layers-num+1,layers)]
+        self.resblocks= nn.Sequential(
+            *tmp
+        )
+        # self.resblocks = nn.Sequential(
+        #     *[ResidualAttentionBlockVit(width, heads, attn_mask) for _ in range(layers)]
+        # )
+
+    def forward(self, x: torch.Tensor, **kwargs):
+        layerNum = 0
+        intermediate_feature = []
+        intermediate_feature.append(x)
+        for block in self.resblocks:
+            # x = block(x)
+            layerNum += 1
+            # if layerNum -1== self.layermaskvit:
+            if layerNum > self.layermaskvit:
+                x = block(x, **kwargs)
+            else:    
+                x = block(x)
+            intermediate_feature.append(x)
+        return x, intermediate_feature
+
 
 class VisionTransformer(nn.Module):
     def __init__(
@@ -321,7 +402,8 @@ class VisionTransformer(nn.Module):
         self.grid_size = input_resolution // patch_size
         self.ln_pre = LayerNorm(width)
 
-        self.transformer = Transformer(width, layers, heads)
+        # self.transformer = Transformer(width, layers, heads)
+        self.transformer = TransformerVit(width, layers, heads)
 
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
@@ -332,6 +414,7 @@ class VisionTransformer(nn.Module):
         mask: torch.Tensor = None,
         inter_method="bicubic",
         return_cls=True,
+        mask_feature: torch.Tensor = None,
     ):
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         b, _, gh, gw = x.size()
@@ -438,7 +521,9 @@ class VisionTransformer(nn.Module):
             if x.size()[1] == 1:
                 x = x.expand(x.size()[0], mask.shape[0], x.size()[2])
 
-        x = self.transformer(x, key_padding_mask=mask)
+        # x = self.transformer(x, key_padding_mask=mask)
+        x,intermediate_feature = self.transformer(x, key_padding_mask=mask, mask_feature = mask_feature,\
+         return_attention = False)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
         if return_cls:
@@ -813,6 +898,115 @@ def multi_head_attention_forward_my(
         return attn_output, attn_output_weights.sum(dim=1) / num_heads
     else:
         return attn_output, None
+
+# mask直接作用于value上，没有k,v计算attention
+def multi_head_attention_forward_vit_softmax_noattn(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    embed_dim_to_check: int,
+    num_heads: int,
+    in_proj_weight: Tensor,
+    in_proj_bias: Tensor,
+    bias_k: Optional[Tensor],
+    bias_v: Optional[Tensor],
+    add_zero_attn: bool,
+    dropout_p: float,
+    out_proj_weight: Tensor,
+    out_proj_bias: Tensor,
+    training: bool = True,
+    key_padding_mask: Optional[Tensor] = None,
+    need_weights: bool = True,
+    attn_mask: Optional[Tensor] = None,
+    use_separate_proj_weight: bool = False,
+    q_proj_weight: Optional[Tensor] = None,
+    k_proj_weight: Optional[Tensor] = None,
+    v_proj_weight: Optional[Tensor] = None,
+    static_k: Optional[Tensor] = None,
+    static_v: Optional[Tensor] = None,
+    mask_feature: Optional[Tensor] = None,
+) -> Tuple[Tensor, Optional[Tensor]]:
+    tgt_len, bsz, embed_dim = query.size()
+    assert embed_dim == embed_dim_to_check
+    # allow MHA to have different sizes for the feature dimension
+    assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
+    head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+    scaling = float(head_dim) ** -0.5
+    if not use_separate_proj_weight:
+        if (query is key or torch.equal(query, key)) and (key is value or torch.equal(key, value)):
+            # self-attention
+            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+    q = q * scaling
+    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    if k is not None:
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    if v is not None:
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    src_len = k.size(1)
+    
+    #####################################################################################################################
+    # 处理mask feature的尺寸
+    BSZ, Mbs, Mh, Mw = mask_feature.shape
+    # down_ratio = np.sqrt(Mh*Mw/(tgt_len-1))
+    Mh_new = int(Mh//4)
+    Mw_new = int(Mw//4)
+    mask_feature = F.interpolate(mask_feature, size=(Mh_new, Mw_new), mode = "nearest")
+    mask_feature = mask_feature.to(torch.float32)
+    
+    # attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    # assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+    # 2022-12-11 gt mask 下进行修改
+    new_mask_feature = torch.ones_like(mask_feature, dtype = k.dtype)
+    new_mask_feature.masked_fill_(mask_feature<0.5, float("-inf"))    
+    mask_feature = new_mask_feature
+
+    mask_flatten =mask_feature.reshape(bsz, -1, Mh_new*Mw_new)
+    mask_flatten_repeat = mask_flatten.repeat(num_heads, 1,1)
+    
+    mask_list = []
+    for i in range(bsz):
+        mask_ = mask_flatten_repeat[i::bsz, :,:]
+        mask_list.append(mask_)
+    
+    mask_new = torch.stack(mask_list)
+    
+    mask_new = mask_new.view(bsz*num_heads,100,-1)
+    mask_new = mask_new.sigmoid()
+    # mask_new = softmax(mask_new, dim = -1)
+    tmp = torch.ones(bsz*num_heads,100,1).to(mask_new)
+    mask_new =torch.cat((tmp, mask_new), dim = 2)
+    
+    # mask_new_softmax = softmax(mask_new, dim = -1)
+    # import pdb; pdb.set_trace()
+    mask_new_softmax = mask_new
+    ####################################################################################
+    # attn_output_weights = torch.bmm(q, k.transpose(-2,-1))
+    # attn_output_weights = softmax(attn_output_weights, dim=-1)
+    # attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
+    # attn_output_weights = dropout(attn_output_weights, p = dropout_p)
+    # return attn_output_weights, None
+    # attn_output_weights = attn_output_weights.sigmoid()
+    # attn_output = torch.bmm(attn_output_weights, v)
+    # import pdb; pdb.set_trace()
+    # attn_output_weights_mask = torch.einsum("qld, qnd->qnld", attn_output_weights, mask_new_softmax)
+    
+    # attn_output_weights_mask = attn_output_weights
+    ####################################################################################
+    attn_output_weights_mask = mask_new_softmax
+    attn_output = torch.einsum("qnl, qlc->qnlc", attn_output_weights_mask, v)
+    attn_output = attn_output.sum(dim = 1)
+    # attn_output = torch.einsum("qld, qdc->qlc", attn_output_weights_mask, v)
+    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    if need_weights:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        return attn_output, attn_output_weights.sum(dim=1) / num_heads
+    else:
+        return attn_output, None
+
 
 
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:

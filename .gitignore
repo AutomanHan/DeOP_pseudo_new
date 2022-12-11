@@ -4,8 +4,7 @@ outputs
 instant_test_output
 inference_test_output
 prompt
-
-
+job/visualzie_attention
 
 *.json
 *.diff
