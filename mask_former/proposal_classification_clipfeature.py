@@ -113,6 +113,10 @@ class ProposalClipClassifierFeature(nn.Module):
         # )
     
         logits = self.clip_adapter(images, class_names, masks)
+
+        # 2022-12-16 修改 logits输出为L2 Norm
+        logits = self.clip_adapter.normalize_feature(logits)
+        # 2022-12-16 修改 logits输出为L2 Norm
         metadata = MetadataCatalog.get(dataset_name)
 
         if self.training:

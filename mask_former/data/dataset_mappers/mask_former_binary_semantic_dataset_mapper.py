@@ -67,6 +67,7 @@ class MaskFormerBinarySemanticDatasetMapper:
         # Build augmentation
         # before augmentation, we have to crop the image around the selected mask with a expand ratio
         augs = [CropImageWithMask(cfg.MODEL.CLIP_ADAPTER.MASK_EXPAND_RATIO)]
+        augs = []
         if is_train:
             augs.append(RandomResizedCrop(cfg.INPUT.MIN_SIZE_TRAIN))
             augs.append(T.RandomFlip())

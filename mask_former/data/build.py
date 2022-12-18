@@ -372,7 +372,7 @@ def dataset_sample_per_class(cfg):
             tmp.extend(v)
         dataset_dicts = tmp
         logger = logging.getLogger(__name__)
-        logger.info(tmp)
+        # logger.info(tmp)
     dataset = dataset_dicts
     print_classification_instances_class_histogram(
         dataset, MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).stuff_classes

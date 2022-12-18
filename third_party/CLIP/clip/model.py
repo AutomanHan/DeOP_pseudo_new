@@ -8,6 +8,15 @@ from torch import nn
 
 from torch import _VF
 
+from torch.nn.parameter import Parameter
+import torch.nn.init as init
+from torch.nn.init import xavier_uniform_
+from torch.nn.init import constant_
+from torch.nn.init import xavier_normal_
+
+import math
+
+
 from typing import Optional
 
 class Bottleneck(nn.Module):
@@ -899,113 +908,6 @@ def multi_head_attention_forward_my(
     else:
         return attn_output, None
 
-# mask直接作用于value上，没有k,v计算attention
-def multi_head_attention_forward_vit_softmax_noattn(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    embed_dim_to_check: int,
-    num_heads: int,
-    in_proj_weight: Tensor,
-    in_proj_bias: Tensor,
-    bias_k: Optional[Tensor],
-    bias_v: Optional[Tensor],
-    add_zero_attn: bool,
-    dropout_p: float,
-    out_proj_weight: Tensor,
-    out_proj_bias: Tensor,
-    training: bool = True,
-    key_padding_mask: Optional[Tensor] = None,
-    need_weights: bool = True,
-    attn_mask: Optional[Tensor] = None,
-    use_separate_proj_weight: bool = False,
-    q_proj_weight: Optional[Tensor] = None,
-    k_proj_weight: Optional[Tensor] = None,
-    v_proj_weight: Optional[Tensor] = None,
-    static_k: Optional[Tensor] = None,
-    static_v: Optional[Tensor] = None,
-    mask_feature: Optional[Tensor] = None,
-) -> Tuple[Tensor, Optional[Tensor]]:
-    tgt_len, bsz, embed_dim = query.size()
-    assert embed_dim == embed_dim_to_check
-    # allow MHA to have different sizes for the feature dimension
-    assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
-    head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
-    scaling = float(head_dim) ** -0.5
-    if not use_separate_proj_weight:
-        if (query is key or torch.equal(query, key)) and (key is value or torch.equal(key, value)):
-            # self-attention
-            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
-    q = q * scaling
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
-    if k is not None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-    if v is not None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-    src_len = k.size(1)
-    
-    #####################################################################################################################
-    # 处理mask feature的尺寸
-    BSZ, Mbs, Mh, Mw = mask_feature.shape
-    # down_ratio = np.sqrt(Mh*Mw/(tgt_len-1))
-    Mh_new = int(Mh//4)
-    Mw_new = int(Mw//4)
-    mask_feature = F.interpolate(mask_feature, size=(Mh_new, Mw_new), mode = "nearest")
-    mask_feature = mask_feature.to(torch.float32)
-    
-    # attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-    # assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
-    # 2022-12-11 gt mask 下进行修改
-    new_mask_feature = torch.ones_like(mask_feature, dtype = k.dtype)
-    new_mask_feature.masked_fill_(mask_feature<0.5, float("-inf"))    
-    mask_feature = new_mask_feature
-
-    mask_flatten =mask_feature.reshape(bsz, -1, Mh_new*Mw_new)
-    mask_flatten_repeat = mask_flatten.repeat(num_heads, 1,1)
-    
-    mask_list = []
-    for i in range(bsz):
-        mask_ = mask_flatten_repeat[i::bsz, :,:]
-        mask_list.append(mask_)
-    
-    mask_new = torch.stack(mask_list)
-    
-    mask_new = mask_new.view(bsz*num_heads,100,-1)
-    mask_new = mask_new.sigmoid()
-    # mask_new = softmax(mask_new, dim = -1)
-    tmp = torch.ones(bsz*num_heads,100,1).to(mask_new)
-    mask_new =torch.cat((tmp, mask_new), dim = 2)
-    
-    # mask_new_softmax = softmax(mask_new, dim = -1)
-    # import pdb; pdb.set_trace()
-    mask_new_softmax = mask_new
-    ####################################################################################
-    # attn_output_weights = torch.bmm(q, k.transpose(-2,-1))
-    # attn_output_weights = softmax(attn_output_weights, dim=-1)
-    # attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
-    # attn_output_weights = dropout(attn_output_weights, p = dropout_p)
-    # return attn_output_weights, None
-    # attn_output_weights = attn_output_weights.sigmoid()
-    # attn_output = torch.bmm(attn_output_weights, v)
-    # import pdb; pdb.set_trace()
-    # attn_output_weights_mask = torch.einsum("qld, qnd->qnld", attn_output_weights, mask_new_softmax)
-    
-    # attn_output_weights_mask = attn_output_weights
-    ####################################################################################
-    attn_output_weights_mask = mask_new_softmax
-    attn_output = torch.einsum("qnl, qlc->qnlc", attn_output_weights_mask, v)
-    attn_output = attn_output.sum(dim = 1)
-    # attn_output = torch.einsum("qld, qdc->qlc", attn_output_weights_mask, v)
-    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-    if need_weights:
-        # average attention weights over heads
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        return attn_output, attn_output_weights.sum(dim=1) / num_heads
-    else:
-        return attn_output, None
 
 
 
@@ -1070,3 +972,238 @@ def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool 
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
     return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
+
+class MultiheadAttentionVit(nn.Module):
+    bias_k: Optional[torch.Tensor]
+    bias_v: Optional[torch.Tensor]
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+        super(MultiheadAttentionVit, self).__init__()
+        self.embed_dim = embed_dim
+        self.kdim = kdim if kdim is not None else embed_dim
+        self.vdim = vdim if vdim is not None else embed_dim
+        self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
+
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+
+        if self._qkv_same_embed_dim is False:
+            self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
+            self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
+            self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.register_parameter('in_proj_weight', None)
+        else:
+            self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+            self.register_parameter('q_proj_weight', None)
+            self.register_parameter('k_proj_weight', None)
+            self.register_parameter('v_proj_weight', None)
+
+        if bias:
+            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+        else:
+            self.register_parameter('in_proj_bias', None)
+        self.out_proj = _LinearWithBias(embed_dim, embed_dim)
+
+        if add_bias_kv:
+            self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
+            self.bias_v = Parameter(torch.empty(1, 1, embed_dim))
+        else:
+            self.bias_k = self.bias_v = None
+
+        self.add_zero_attn = add_zero_attn
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        if self._qkv_same_embed_dim:
+            xavier_uniform_(self.in_proj_weight)
+        else:
+            xavier_uniform_(self.q_proj_weight)
+            xavier_uniform_(self.k_proj_weight)
+            xavier_uniform_(self.v_proj_weight)
+
+        if self.in_proj_bias is not None:
+            constant_(self.in_proj_bias, 0.)
+            constant_(self.out_proj.bias, 0.)
+        if self.bias_k is not None:
+            xavier_normal_(self.bias_k)
+        if self.bias_v is not None:
+            xavier_normal_(self.bias_v)
+
+    def __setstate__(self, state):
+        # Support loading old MultiheadAttention checkpoints generated by v1.1.0
+        if '_qkv_same_embed_dim' not in state:
+            state['_qkv_same_embed_dim'] = True
+
+        super(MultiheadAttentionVit, self).__setstate__(state)
+    
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None, \
+                mask_feature : Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+        # return multi_head_attention_forward_vit(
+        # return multi_head_attention_forward_vit_inf(
+        # return multi_head_attention_forward_vit_softmax_split(
+        return multi_head_attention_forward_vit_softmax_noattn(
+        # return multi_head_attention_forward_vit_noattn(
+        # return multi_head_attention_forward_vit_softmax_noattn_nosum(  
+                query, key, value, self.embed_dim, self.num_heads,
+                self.in_proj_weight, self.in_proj_bias,
+                self.bias_k, self.bias_v, self.add_zero_attn,
+                self.dropout, self.out_proj.weight, self.out_proj.bias,
+                training=self.training,
+                key_padding_mask=key_padding_mask, need_weights=need_weights,
+                attn_mask=attn_mask, mask_feature = mask_feature)
+
+
+# mask直接作用于value上，没有k,v计算attention
+def multi_head_attention_forward_vit_softmax_noattn(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    embed_dim_to_check: int,
+    num_heads: int,
+    in_proj_weight: Tensor,
+    in_proj_bias: Tensor,
+    bias_k: Optional[Tensor],
+    bias_v: Optional[Tensor],
+    add_zero_attn: bool,
+    dropout_p: float,
+    out_proj_weight: Tensor,
+    out_proj_bias: Tensor,
+    training: bool = True,
+    key_padding_mask: Optional[Tensor] = None,
+    need_weights: bool = True,
+    attn_mask: Optional[Tensor] = None,
+    use_separate_proj_weight: bool = False,
+    q_proj_weight: Optional[Tensor] = None,
+    k_proj_weight: Optional[Tensor] = None,
+    v_proj_weight: Optional[Tensor] = None,
+    static_k: Optional[Tensor] = None,
+    static_v: Optional[Tensor] = None,
+    mask_feature: Optional[Tensor] = None,
+) -> Tuple[Tensor, Optional[Tensor]]:
+    tgt_len, bsz, embed_dim = query.size()
+    assert embed_dim == embed_dim_to_check
+    # allow MHA to have different sizes for the feature dimension
+    assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
+    head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+    scaling = float(head_dim) ** -0.5
+    if not use_separate_proj_weight:
+        if (query is key or torch.equal(query, key)) and (key is value or torch.equal(key, value)):
+            # self-attention
+            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+    q = q * scaling
+    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    if k is not None:
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    if v is not None:
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    src_len = k.size(1)
+    
+    #####################################################################################################################
+    # 处理mask feature的尺寸
+    BSZ, Mbs, Mh, Mw = mask_feature.shape
+    # down_ratio = np.sqrt(Mh*Mw/(tgt_len-1))
+    Mh_new = int(Mh//16)
+    Mw_new = int(Mw//16)
+    mask_feature = F.interpolate(mask_feature, size=(Mh_new, Mw_new), mode = "nearest")
+    mask_feature = mask_feature.to(torch.float32)
+    
+    # attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    # assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+
+    # 2022-12-11 gt mask 下进行修改
+    # new_mask_feature = torch.ones_like(mask_feature, dtype = k.dtype)
+    # new_mask_feature.masked_fill_(mask_feature<0.5, float("-inf"))    
+    # mask_feature = new_mask_feature
+
+    mask_flatten =mask_feature.reshape(bsz, -1, Mh_new*Mw_new)
+    mask_flatten_repeat = mask_flatten.repeat(num_heads, 1,1)
+    
+    mask_list = []
+    for i in range(bsz):
+        mask_ = mask_flatten_repeat[i::bsz, :,:]
+        mask_list.append(mask_)
+    
+    mask_new = torch.stack(mask_list)
+    
+    mask_new = mask_new.view(bsz*num_heads,1,-1)
+    # import pdb; pdb.set_trace()
+    # mask_new = mask_new.sigmoid()
+
+    # mask_new = softmax(mask_new, dim = -1)
+    tmp = torch.ones(bsz*num_heads,1,1).to(mask_new)
+    mask_new =torch.cat((tmp, mask_new), dim = 2)
+    
+    # mask_new_softmax = softmax(mask_new, dim = -1)
+    # import pdb; pdb.set_trace()
+    mask_new_softmax = mask_new
+    ####################################################################################
+    # attn_output_weights = torch.bmm(q, k.transpose(-2,-1))
+    # attn_output_weights = softmax(attn_output_weights, dim=-1)
+    # attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
+    # attn_output_weights = dropout(attn_output_weights, p = dropout_p)
+    # return attn_output_weights, None
+    # attn_output_weights = attn_output_weights.sigmoid()
+    # attn_output = torch.bmm(attn_output_weights, v)
+    # import pdb; pdb.set_trace()
+    # attn_output_weights_mask = torch.einsum("qld, qnd->qnld", attn_output_weights, mask_new_softmax)
+    
+    # attn_output_weights_mask = attn_output_weights
+    ####################################################################################
+    attn_output_weights_mask = mask_new_softmax
+    # import pdb; pdb.set_trace()
+    attn_output = torch.einsum("qnl, qlc->qnlc", attn_output_weights_mask, v)
+    attn_output = attn_output.sum(dim = 1)
+    # attn_output = torch.einsum("qld, qdc->qlc", attn_output_weights_mask, v)
+    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    if need_weights:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        return attn_output, attn_output_weights.sum(dim=1) / num_heads
+    else:
+        return attn_output, None
+
+
+class Linear(nn.Module):
+    __constants__ = ['in_features', 'out_features']
+    in_features: int
+    out_features: int
+    weight: Tensor
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
+        super(Linear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_features))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.linear(input, self.weight, self.bias)
+
+    def extra_repr(self) -> str:
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
+# This class exists solely for Transformer; it has an annotation stating
+# that bias is never None, which appeases TorchScript
+class _LinearWithBias(Linear):
+    bias: Tensor  # type: ignore
+
+    def __init__(self, in_features: int, out_features: int) -> None:
+        super().__init__(in_features, out_features, bias=True)  # type: ignore

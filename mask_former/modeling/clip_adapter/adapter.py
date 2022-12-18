@@ -331,11 +331,14 @@ class ClipFeatureAdapter(nn.Module):
         return self._get_text_features(noun_list)
 
     def get_image_features(self, image: torch.Tensor, mask: torch.tensor, return_cls: bool):
-        image_features = self.clip_model.visual(image, return_cls=return_cls)
+        # import pdb; pdb.set_trace()
+        image_features = self.clip_model.visual(image, return_cls=return_cls,  mask_feature = mask.unsqueeze(1))
         h, w = image_features.shape[1], image_features.shape[2]
         image_features = image_features/(h*w)
         # F.interpolate(mask_pred.unsqueeze(0),size=(clip_feature.shape[1], clip_feature.shape[2]),mode="nearest")
         # import pdb; pdb.set_trace()
+
+        mask = mask * 0.98 + 0.01
         upsample = False
         upDownSampel = False
         if upsample and not upDownSampel:
@@ -350,7 +353,7 @@ class ClipFeatureAdapter(nn.Module):
             mask_downsample = F.interpolate(mask.unsqueeze(1), size=(image_features.shape[1], image_features.shape[2]), mode = "nearest")
         else:
             mask = mask.to(image_features.dtype)
-            mask_downsample = F.interpolate(mask.unsqueeze(1), size=(image_features.shape[1], image_features.shape[2]), mode = "nearest")
+            mask_downsample = F.interpolate(mask.unsqueeze(1), size=(image_features.shape[1], image_features.shape[2]), mode = "bilinear")
         mask_new = []
         
         if((mask_downsample.sum(dim=(2,3))==0).sum() > 0):
