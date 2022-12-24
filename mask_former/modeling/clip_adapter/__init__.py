@@ -33,9 +33,10 @@ def build_prompt_learner(cfg):
                 },
                 strict=False,
             )
-            for param in prompt_learner.parameters():
-                param.requires_grad = False
-            prompt_learner.with_trainable_params = False
+            # import pdb; pdb.set_trace()
+            # for param in prompt_learner.parameters():
+            #     param.requires_grad = False
+            # prompt_learner.with_trainable_params = False
             log_first_n(
                 logging.INFO,
                 "Load Prompt Learner from {}".format(cfg.PROMPT_CHECKPOINT),

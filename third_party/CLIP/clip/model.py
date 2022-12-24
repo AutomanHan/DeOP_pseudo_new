@@ -346,7 +346,7 @@ class ResidualAttentionBlockVit(nn.Module):
         return x
 class TransformerVit(nn.Module):
     def __init__(
-        self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, layermaskvit = 11
+        self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, layermaskvit = 12
     ):
         super().__init__()
         self.width = width

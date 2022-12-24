@@ -194,7 +194,7 @@ class ZeroShotMaskFormer(MaskFormer):
         class_names = self.get_class_name_list(dataset_name)
         text_features = self.clip_adapter.get_text_features(class_names)
         
-        import pdb; pdb.set_trace()
+
         if self.clip_kd_loss:
             semseg_pred_mask = outputs["pred_masks"]
             semseg_pred_logits = outputs["pred_logits"]
